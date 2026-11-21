@@ -72,7 +72,7 @@ notebooks/        Databricks notebooks, run in order
   01_clean_jobs_failures  bronze → silver_jobs, silver_failures (failures linked to repair jobs)
   01_downtime_features    downtime buckets, silver_downtime, rolling pump-sensor features (needs silver_daily)
   02_ranking        gold_well_month, gold_well_period, cost score and ranks (validation added next)
-  03_runlife_payback  failure rates by equipment, break-even payback
+  03_runlife_payback  failure rates by pump make, model and RPM within area (gold_failure_rates); payback added next
   04_early_warning  threshold rules, 2025 tuning, 2026 test
   05_weather        optional weather join
 src/              shared cleaning and feature functions
