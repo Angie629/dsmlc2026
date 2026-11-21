@@ -84,9 +84,9 @@ databricks tables list workspace dsmlc --profile datathon
 Expected tables:
 
 ```
-workspace.dsmlc.daily_production
-workspace.dsmlc.production_failures
-workspace.dsmlc.well_jobs
+workspace.dsmlc.bronze_daily
+workspace.dsmlc.bronze_failures
+workspace.dsmlc.bronze_jobs
 ```
 
 ## Where our data lives
@@ -94,7 +94,7 @@ workspace.dsmlc.well_jobs
 | Item | Location |
 |---|---|
 | Catalog / schema | `workspace.dsmlc` |
-| Bronze tables | `daily_production`, `well_jobs`, `production_failures` |
+| Bronze tables | `bronze_daily`, `bronze_jobs`, `bronze_failures` |
 | Raw Parquet files | Volume `workspace.dsmlc.dataset` (`/Volumes/workspace/dsmlc/dataset/`) |
 | SQL warehouse | Serverless Starter Warehouse. Get its ID with `databricks warehouses list --profile datathon` |
 
@@ -108,7 +108,7 @@ Put the request in a JSON file outside the repo, e.g. `q.json`:
 {
   "warehouse_id": "<id from databricks warehouses list>",
   "wait_timeout": "50s",
-  "statement": "SELECT COUNT(*) FROM workspace.dsmlc.daily_production"
+  "statement": "SELECT COUNT(*) FROM workspace.dsmlc.bronze_daily"
 }
 ```
 

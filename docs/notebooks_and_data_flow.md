@@ -28,7 +28,7 @@ How the notebooks are named, which Databricks tables each one reads and writes, 
 
 | Layer | Naming | Meaning |
 |---|---|---|
-| Bronze | Original file names: `daily_production`, `well_jobs`, `production_failures` | The three Parquet files loaded as-is. **Read-only**: never dropped or overwritten |
+| Bronze | `bronze_<entity>`: `bronze_daily`, `bronze_jobs`, `bronze_failures` | The three Parquet files (`daily_production.parquet`, `well_jobs.parquet`, `production_failures.parquet`) loaded as-is. **Read-only**: never dropped or overwritten |
 | Silver | `silver_<entity>` | Cleaned, same grain as the source (one row per well-day, job or failure) |
 | Supporting | Descriptive names: `downtime_bucket_map`, `feat_daily_sensor`, `cleaning_log` | Lookup, feature and audit tables built in stage 01 |
 | Gold | `gold_<subject>` | Analysis-ready tables: aggregates, scores and results for the dashboard and slides |
@@ -97,9 +97,9 @@ flowchart LR
   F[/"#nbsp;Parquet files in volume#nbsp;<br>#nbsp;f1 · loaded by Jacob#nbsp;"/]:::load
 
   subgraph BRONZE["Bronze (raw, read-only)"]
-    DP[("#nbsp;#nbsp;daily_production#nbsp;#nbsp;")]:::bronze
-    WJ[("#nbsp;#nbsp;well_jobs#nbsp;#nbsp;")]:::bronze
-    PF[("#nbsp;#nbsp;production_failures#nbsp;#nbsp;")]:::bronze
+    DP[("#nbsp;#nbsp;bronze_daily#nbsp;#nbsp;")]:::bronze
+    WJ[("#nbsp;#nbsp;bronze_jobs#nbsp;#nbsp;")]:::bronze
+    PF[("#nbsp;#nbsp;bronze_failures#nbsp;#nbsp;")]:::bronze
   end
 
   A[["#nbsp;01a_clean_daily · f4#nbsp;"]]:::nb
@@ -209,8 +209,8 @@ flowchart LR
 
 | Notebook | Tasks | Owner | Reads | Writes | Status (Nov 21) |
 |---|---|---|---|---|---|
-| `01a_clean_daily.py` | f4 | Angie | `daily_production` | `silver_daily`, `cleaning_log` | Ran in Databricks |
-| `01b_clean_jobs_failures.py` | f5 | Jacob | `well_jobs`, `production_failures`, `daily_production` (well list) | `silver_jobs`, `silver_failures`, `cleaning_log` | Ran |
+| `01a_clean_daily.py` | f4 | Angie | `bronze_daily` | `silver_daily`, `cleaning_log` | Ran in Databricks |
+| `01b_clean_jobs_failures.py` | f5 | Jacob | `bronze_jobs`, `bronze_failures`, `bronze_daily` (well list) | `silver_jobs`, `silver_failures`, `cleaning_log` | Ran |
 | `01c_downtime_features.py` | f6 | Ananya | `silver_daily` | `downtime_bucket_map`, `silver_downtime`, `feat_daily_sensor`, `cleaning_log` | Ran |
 | `01d_daily_checks.py` | n1 | Ananya | `silver_daily`, `silver_downtime`, `silver_failures` | `gold_failure_downtime` | Ran |
 | `02a_ranking.py` | s1, s4 | Angie | `silver_daily`, `silver_downtime`, `silver_jobs`, `silver_failures` | `gold_well_month`, `gold_well_period`, `gold_ranking_validation` | s1 ran (netback C$32.50); s4 written and tested, not yet run in Databricks |
@@ -228,9 +228,9 @@ Row counts are from Databricks on Nov 21.
 
 | Table | Grain | Rows | Written by | Notes |
 |---|---|---|---|---|
-| `daily_production` | well × day | 5,075,590 | f1: loaded from the volume `workspace.dsmlc.dataset` (no notebook in the repo) | 42 columns incl. `_rescued_data` from the loader |
-| `well_jobs` | one job | 15,610 | f1 (same load) | |
-| `production_failures` | one failure | 2,873 | f1 (same load) | Failure log is live only from Jun 2025 |
+| `bronze_daily` | well × day | 5,075,590 | f1: loaded from the volume `workspace.dsmlc.dataset` (no notebook in the repo) | 42 columns incl. `_rescued_data` from the loader |
+| `bronze_jobs` | one job | 15,610 | f1 (same load) | |
+| `bronze_failures` | one failure | 2,873 | f1 (same load) | Failure log is live only from Jun 2025 |
 
 ### Silver and supporting
 

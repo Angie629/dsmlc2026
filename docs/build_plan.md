@@ -301,8 +301,8 @@ Owners: A = Angie, J = Jacob, N = Ananya. ◆ marks a checkpoint.
 
 **Inputs:** `dataset/*.parquet` (202 MB + 3.5 MB + 91 KB)
 
-1. Upload the 3 files to a Unity Catalog volume, e.g. `/Volumes/main/strathcona/raw/`.
-2. Create bronze Delta tables as-is: `bronze_daily`, `bronze_jobs`, `bronze_failures`.
+1. Upload the 3 files to the Unity Catalog volume `/Volumes/workspace/dsmlc/dataset/`.
+2. Create bronze Delta tables as-is: `workspace.dsmlc.bronze_daily`, `bronze_jobs`, `bronze_failures` (renamed from the loaded names on Nov 21).
 3. Confirm row counts match the handbook: 5,075,590 / 15,610 / 2,873.
 4. Share the catalog/schema names in the team chat.
 

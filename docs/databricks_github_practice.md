@@ -64,7 +64,7 @@ You can edit a notebook in Databricks or locally (VS Code, Claude Code), but **n
 
 ## Table rules
 
-- **Bronze is read-only.** `daily_production`, `well_jobs` and `production_failures` are never dropped or overwritten. Fixes go in silver.
+- **Bronze is read-only.** `bronze_daily`, `bronze_jobs` and `bronze_failures` are never dropped or overwritten. Fixes go in silver.
 - **A notebook writes only its own tables** (see the ownership table).
 - **Silver freezes at Fri 11 PM.** Later data issues go in [known_issues.md](known_issues.md), not into silver.
 - Use full names (`workspace.dsmlc.silver_daily`) in code, so it doesn't depend on the current schema.

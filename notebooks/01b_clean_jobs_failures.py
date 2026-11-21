@@ -17,9 +17,9 @@ from pyspark.sql import Window
 from pyspark.sql import functions as F
 
 CATALOG_SCHEMA = "workspace.dsmlc"
-JOBS_SOURCE = f"{CATALOG_SCHEMA}.well_jobs"
-FAILURES_SOURCE = f"{CATALOG_SCHEMA}.production_failures"
-DAILY_SOURCE = f"{CATALOG_SCHEMA}.daily_production"
+JOBS_SOURCE = f"{CATALOG_SCHEMA}.bronze_jobs"
+FAILURES_SOURCE = f"{CATALOG_SCHEMA}.bronze_failures"
+DAILY_SOURCE = f"{CATALOG_SCHEMA}.bronze_daily"
 JOBS_TARGET = f"{CATALOG_SCHEMA}.silver_jobs"
 FAILURES_TARGET = f"{CATALOG_SCHEMA}.silver_failures"
 LOG_TABLE = f"{CATALOG_SCHEMA}.cleaning_log"
