@@ -121,36 +121,52 @@ win = (
 )
 
 
-def per_failure(g):
-    g = g.set_index("offset").reindex(range(-LOOK_BACK, LOOK_AHEAD + 1))
-    down = g.hours_on_prod.fillna(0) < 1
-    k = 0
-    if down.loc[0] or down.loc[-1]:
-        k = 0 if down.loc[0] else -1
-        while k - 1 >= -LOOK_BACK and down.loc[k - 1]:
-            k -= 1
-    after = g.loc[max(k, -1) + 1:]
-    restart = after.index[after.hours_on_prod.fillna(0) >= 1]
-    rs = int(restart[0]) if len(restart) else None
-    w = g.loc[k:LOST_OIL_DAYS_AFTER]
-    return pd.Series({
-        "stop_offset": k,
-        "restart_offset": rs,
-        "down_days": (rs - k) if rs is not None else None,
-        "downhole_lost_oil_m3": w.loc[w.bucket == "Downhole", "lost_oil_m3"].sum(),
-        "all_lost_oil_m3": w.lost_oil_m3.sum(),
-        "downhole_lost_oil_old_window_m3": g.loc[-1:LOST_OIL_DAYS_AFTER].pipe(lambda x: x.loc[x.bucket == "Downhole", "lost_oil_m3"].sum()),
-    })
+print(f"Window rows: {len(win):,} for {win.failure_id.nunique():,} failures")
 
 
-pf = win.groupby("failure_id").apply(per_failure).reset_index()
+def downtime_per_failure(win):
+    """Stop day, restart day and lost oil for every failure at once (no per-failure loop)."""
+    ids = win.failure_id.unique()
+    grid = pd.MultiIndex.from_product([ids, range(-LOOK_BACK, LOOK_AHEAD + 1)], names=["failure_id", "offset"])
+    g = win.set_index(["failure_id", "offset"]).reindex(grid).reset_index()
+    g["down"] = g.hours_on_prod.fillna(0) < 1
+    g["streak"] = (~g.down).groupby(g.failure_id).cumsum()
+    g["streak_start"] = g[g.down].groupby(["failure_id", "streak"]).offset.transform("min")
+
+    at = g[g.offset.isin([0, -1])].pivot(index="failure_id", columns="offset", values=["down", "streak_start"])
+    down0, down1 = at[("down", 0)].astype(bool), at[("down", -1)].astype(bool)
+    stop = np.where(down0, at[("streak_start", 0)], np.where(down1, at[("streak_start", -1)], 0))
+    out = pd.DataFrame({"failure_id": at.index, "stop_offset": stop.astype(int)})
+
+    g = g.merge(out, on="failure_id")
+    running = g[(g.offset > np.maximum(g.stop_offset, -1)) & (g.hours_on_prod.fillna(0) >= 1)]
+    out = out.merge(running.groupby("failure_id").offset.min().rename("restart_offset"), on="failure_id", how="left")
+    out["down_days"] = out.restart_offset - out.stop_offset
+
+    new_w = g[(g.offset >= g.stop_offset) & (g.offset <= LOST_OIL_DAYS_AFTER)]
+    old_w = g[g.offset.between(-1, LOST_OIL_DAYS_AFTER) & (g.bucket == "Downhole")]
+    out = out.merge(new_w[new_w.bucket == "Downhole"].groupby("failure_id").lost_oil_m3.sum().rename("downhole_lost_oil_m3"), on="failure_id", how="left")
+    out = out.merge(new_w.groupby("failure_id").lost_oil_m3.sum().rename("all_lost_oil_m3"), on="failure_id", how="left")
+    out = out.merge(old_w.groupby("failure_id").lost_oil_m3.sum().rename("downhole_lost_oil_old_window_m3"), on="failure_id", how="left")
+    return out.fillna({"downhole_lost_oil_m3": 0.0, "all_lost_oil_m3": 0.0, "downhole_lost_oil_old_window_m3": 0.0})
+
+
+pf = downtime_per_failure(win)
 fd = fail.toPandas().merge(pf, on="failure_id", how="left")
-fd["stop_date"] = pd.to_datetime(fd.fd) + pd.to_timedelta(fd.stop_offset.fillna(0), unit="D")
-fd["restart_date"] = pd.to_datetime(fd.fd) + pd.to_timedelta(fd.restart_offset, unit="D")
+fd["fd"] = pd.to_datetime(fd.fd)
+fd["stop_date"] = fd.fd + pd.to_timedelta(fd.stop_offset.fillna(0), unit="D")
+fd["restart_date"] = fd.fd + pd.to_timedelta(fd.restart_offset, unit="D")
 fd["stopped_before_log"] = fd.stop_offset < 0
-fd = fd.rename(columns={"fd": "failure_start_date"})
+fd = fd.rename(columns={"fd": "failure_start_date"}).astype({
+    "stop_offset": "float", "restart_offset": "float", "down_days": "float",
+    "linked_job_cost": "float", "stopped_before_log": "bool",
+})
+print(f"Computed {len(fd):,} failures")
 
-spark.createDataFrame(fd.astype({"down_days": "float", "restart_offset": "float"})).write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(TARGET)
+# COMMAND ----------
+
+spark.createDataFrame(fd).write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(TARGET)
+print(f"Wrote {TARGET}")
 
 # COMMAND ----------
 
