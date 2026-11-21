@@ -146,14 +146,14 @@ flowchart LR
   GFG[("#nbsp;#nbsp;gold_failure_gap#nbsp;#nbsp;")]:::gold
   GRT[("#nbsp;#nbsp;gold_recency_tier#nbsp;#nbsp;")]:::gold
   GFR[("#nbsp;#nbsp;gold_failure_rates#nbsp;#nbsp;")]:::gold
-  GPB[("#nbsp;#nbsp;gold_payback · s5#nbsp;#nbsp;")]:::planned
+  GPB[("#nbsp;#nbsp;gold_payback · s5#nbsp;#nbsp;")]:::gold
   GBS[("#nbsp;#nbsp;gold_budget_scenarios · n4#nbsp;#nbsp;")]:::planned
   GAL[("#nbsp;#nbsp;gold_alerts · s6, s9#nbsp;#nbsp;")]:::planned
 
   SIL --> N2 --> GWM & GWP & GRV
   SIL --> N3a --> GFG & GRT
   SIL --> N3b --> GFR
-  N3b -.-> GPB -.-> GBS
+  N3b --> GPB -.-> GBS
   SIL --> N4 -.-> GAL
   GRT -.-> N4
 ```
@@ -175,7 +175,7 @@ flowchart LR
   GFG[("#nbsp;#nbsp;gold_failure_gap#nbsp;#nbsp;")]:::gold
   GRV[("#nbsp;#nbsp;gold_ranking_validation#nbsp;#nbsp;")]:::gold
   GFD[("#nbsp;#nbsp;gold_failure_downtime#nbsp;#nbsp;")]:::gold
-  GPB[("#nbsp;#nbsp;gold_payback#nbsp;#nbsp;")]:::planned
+  GPB[("#nbsp;#nbsp;gold_payback#nbsp;#nbsp;")]:::gold
   GBS[("#nbsp;#nbsp;gold_budget_scenarios#nbsp;#nbsp;")]:::planned
   GAL[("#nbsp;#nbsp;gold_alerts#nbsp;#nbsp;")]:::planned
 
@@ -186,8 +186,8 @@ flowchart LR
 
   ST & CL & GWM --> P1
   GRT & GWP & GFG & GRV --> P2
-  GFD --> P3
-  GPB & GBS -.-> P3
+  GFD & GPB --> P3
+  GBS -.-> P3
   GRT --> P4
   GAL -.-> P4
 ```
@@ -215,7 +215,7 @@ flowchart LR
 | `01d_daily_checks.py` | n1 | Ananya | `silver_daily`, `silver_downtime`, `silver_failures` | `gold_failure_downtime` | Ran |
 | `02a_ranking.py` | s1, s4 | Angie | `silver_daily`, `silver_downtime`, `silver_jobs`, `silver_failures` | `gold_well_month`, `gold_well_period`, `gold_ranking_validation` | s1 ran (netback C$32.50); s4 written and tested, not yet run in Databricks |
 | `03a_repeat_failures.py` | n2 | Jacob | `silver_failures`, `silver_jobs` | `gold_failure_gap`, `gold_recency_tier` | Ran |
-| `03b_runlife_payback.py` | s2 (s5 next) | Jacob | `silver_daily`, `silver_failures`, `silver_jobs` (+ `gold_failure_downtime` for s5) | `gold_failure_rates` (+ `gold_payback` for s5) | s2 ran; s5 not written. Jacob's `pick_2_actions_jacob_m.ipynb` holds early s5 work |
+| `03b_runlife_payback.py` | s2, s5 | Jacob | `silver_daily`, `silver_failures`, `silver_jobs`, `gold_failure_downtime`, `gold_well_period` (netback) | `gold_failure_rates`, `gold_payback` | Both ran in Databricks. s5 is on branch `jacob_tasks` until merged |
 | `04a_early_warning.py` | s3 (s6, s9 next) | Ananya | `silver_daily`, `silver_failures` (+ `feat_daily_sensor`, `gold_recency_tier` for s6/s9) | Nothing yet (+ `gold_alerts` for s6/s9) | s3 done locally; s6/s9 not written |
 
 Task n3 (strategy case and 30/60/90 plan) has no notebook; it uses the outputs above.
@@ -255,13 +255,13 @@ Row counts are from Databricks on Nov 21.
 | `gold_failure_gap` | failure (`failure_id`) | 2,867 | 03a (n2) | Dashboard page 2, n4 | Days to the next failure; `refail_30`, `refail_90` |
 | `gold_recency_tier` | well × snapshot (`uwi`, `snapshot_date`) | 14,478 | 03a (n2) | Dashboard pages 2 and 4, 04a (s6/s9) | Tier 0/1/2/3+ and next-90-day outcome; `is_current` rows (814 wells) feed the weekly work list |
 | `gold_failure_rates` | dimension × scope × area × group | 186 | 03b (s2) | 03b (s5), slides | Failures per well-year by pump make, model, RPM band within area, with intervals and `vs_area` |
-| `gold_payback` | action × scenario | planned | 03b (s5) | Dashboard page 3 | Cost per failure, break-even, sensitivity grid |
+| `gold_payback` | action × netback × action cost × avoided share | 36 | 03b (s5) | Dashboard page 4, n4 | Bad-actor wells (picked Jun–Dec 2025, rate measured Jan–Oct 2026), mean cost per failure, failures to recover cost, yearly savings, payback years |
 | `gold_budget_scenarios` | scenario × well | planned | n4 (notebook TBD, e.g. `03c_budget_scenarios`) | Dashboard page 3 | Which wells to treat for 25/50/100/200-well budgets |
 | `gold_alerts` | well × day alert | planned | 04a (s6, s9) | Dashboard page 4 | Threshold-rule alerts and their 2026 test metrics |
 
 ## Dashboard pages and their tables
 
-Matches the four pages in the build plan.
+The live dashboard is **Strathcona Reliability Desk** (6 pages + an area filter), built from Ananya's design spec on the `feature-dashboard` branch. Its definition is `dashboard/strathcona_reliability_desk.lvdash.json`, generated and query-tested by `dashboard/build_reliability_desk.py` (`python dashboard/build_reliability_desk.py test`, then `build`). Budget scenarios (page 4) and sensor-rule results (page 5) show a pending note until `gold_budget_scenarios` and `gold_alerts` exist. The table below is the build plan's four-page grouping.
 
 | Page | Task | Owner | Tables |
 |---|---|---|---|
