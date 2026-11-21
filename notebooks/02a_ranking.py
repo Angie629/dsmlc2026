@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 02a · Monthly well table and cost score v1 · task s1 (s4 next)
+# MAGIC # 02a · Monthly well table and cost score v1 · tasks s1, s4
 # MAGIC
 # MAGIC Build plan task s1. Needs all `01_*` notebooks. Writes:
 # MAGIC - `workspace.dsmlc.gold_well_month`: one row per `uwi` × month
@@ -309,3 +309,195 @@ for name, ok in checks.items():
 print(f"Repair $ all silver jobs: {all_repair:,.0f} (profiling: ~212.4M) · in gold: {gold_repair:,.0f}")
 print(f"Downhole lost oil: {gold_downhole:,.0f} m³")
 assert all(checks.values()), "One or more checks failed"
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # s4 · Out-of-time validation of the ranking
+# MAGIC
+# MAGIC Can a list built from history pick the wells that cost the most later? The ranking is made as of the test start (2025-06-01) using only earlier data, then scored on what each well cost from Jun 2025 to Oct 2026.
+# MAGIC
+# MAGIC **Wells:** the eligible producers in `gold_well_period` (≥ 30 producing days in both periods; 911 on the Nov 21 run). Every ranker is scored on the same wells, so the numbers compare directly.
+# MAGIC
+# MAGIC **Rankers** (all use only information from before 2025-06-01):
+# MAGIC
+# MAGIC | Ranker | Ranks wells by |
+# MAGIC |---|---|
+# MAGIC | Random | nothing (expected capture = k) |
+# MAGIC | Size | train-period oil volume (does cost just follow size?) |
+# MAGIC | Cost score | train-period repair $ + lost-oil value |
+# MAGIC | Cost per producing day | cost score ÷ producing days (risk-3 fallback) |
+# MAGIC | Recent repairs | Rod Truck + Workover jobs in the 3 months before the test start (Mar–May 2025), ties broken by cost score. The failure log starts Jun 2025, so repair jobs stand in for recent failures |
+# MAGIC | Cost + recent | average of the cost-score and recent-repairs percentile ranks |
+# MAGIC
+# MAGIC **Measures:** capture@k = share of test-period cost held by the top k% of wells; lift = capture ÷ k; 95% intervals from 1,000 bootstrap resamples of wells.
+
+# COMMAND ----------
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+VAL_TARGET = f"{CATALOG_SCHEMA}.gold_ranking_validation"
+KS = [0.05, 0.10, 0.20]
+N_BOOT = 1000
+SEED = 42
+RECENT_MONTHS = 3
+
+test_start = F.lit(TEST[0]).cast("date")
+eligible = spark.table(PERIOD_TARGET).filter("eligible")
+train = eligible.filter("period = 'train'").select(
+    "uwi", "field_operating_area", "oil_m3", "producing_days", "repair_cost",
+    "downhole_lost_oil_m3", "cost_score", "cost_per_producing_day",
+)
+test = eligible.filter("period = 'test'").select(
+    "uwi",
+    F.col("cost_score").alias("test_cost"),
+    F.col("repair_cost").alias("test_repair"),
+    F.col("downhole_lost_oil_m3").alias("test_lost_oil"),
+)
+recent = (
+    spark.table(MONTH_TARGET)
+    .filter((F.col("month") >= F.add_months(test_start, -RECENT_MONTHS)) & (F.col("month") < test_start))
+    .groupBy("uwi")
+    .agg(F.sum("repair_jobs").alias("recent_repair_jobs"), F.sum("repair_cost").alias("recent_repair_cost"))
+)
+v = (
+    train.join(test, "uwi").join(recent, "uwi", "left")
+    .fillna(0, subset=["recent_repair_jobs", "recent_repair_cost"])
+    .toPandas()
+)
+assert v.cost_score.notna().all(), "cost_score is empty: rerun the s1 cells with the netback set"
+print(f"Wells in the validation: {len(v):,}; with a repair job in the {RECENT_MONTHS} months before the test: {(v.recent_repair_jobs > 0).sum():,}")
+
+# COMMAND ----------
+
+def pct(s):
+    return s.rank(pct=True, method="average")
+
+
+RANKERS = {
+    "Size (oil volume)": ["oil_m3"],
+    "Cost score": ["cost_score"],
+    "Cost per producing day": ["cost_per_producing_day", "cost_score"],
+    "Recent repairs": ["recent_repair_jobs", "cost_score"],
+    "Cost + recent": ["blend", "cost_score"],
+}
+TARGETS = {"cost": "test_cost", "repair $": "test_repair", "lost oil": "test_lost_oil"}
+
+
+def add_blend(df):
+    df = df.copy()
+    df["blend"] = (pct(df.cost_score) + pct(df.recent_repair_jobs)) / 2
+    return df
+
+
+def order(df, cols):
+    return df.sort_values(cols + ["uwi"], ascending=[False] * len(cols) + [True]).index
+
+
+def capture(df, idx, target, k):
+    top = idx[: max(1, int(round(k * len(df))))]
+    total = df[target].sum()
+    return df.loc[top, target].sum() / total if total else np.nan
+
+
+v = add_blend(v)
+rows = []
+for name, cols in RANKERS.items():
+    idx = order(v, cols)
+    for tname, tcol in TARGETS.items():
+        for k in KS:
+            rows.append({"ranker": name, "target": tname, "k": k, "capture": capture(v, idx, tcol, k)})
+
+rng = np.random.default_rng(SEED)
+boot = {(name, k): [] for name in ["Random"] + list(RANKERS) for k in KS}
+for _ in range(N_BOOT):
+    s = add_blend(v.iloc[rng.integers(0, len(v), len(v))].reset_index(drop=True))
+    for name, cols in RANKERS.items():
+        idx = order(s, cols)
+        for k in KS:
+            boot[(name, k)].append(capture(s, idx, "test_cost", k))
+    ridx = s.index[rng.permutation(len(s))]
+    for k in KS:
+        boot[("Random", k)].append(capture(s, ridx, "test_cost", k))
+
+for k in KS:
+    rows.append({"ranker": "Random", "target": "cost", "k": k, "capture": float(np.mean(boot[("Random", k)]))})
+val = pd.DataFrame(rows)
+val["lift"] = val.capture / val.k
+ci = {key: np.percentile(vals, [2.5, 97.5]) for key, vals in boot.items()}
+val["ci_lo"] = [ci[(r, k)][0] if t == "cost" else np.nan for r, t, k in zip(val.ranker, val.target, val.k)]
+val["ci_hi"] = [ci[(r, k)][1] if t == "cost" else np.nan for r, t, k in zip(val.ranker, val.target, val.k)]
+
+headline = val[val.target == "cost"].pivot(index="ranker", columns="k", values="capture")
+headline.columns = [f"capture@{int(round(c * 100))}%" for c in headline.columns]
+headline["lift@10%"] = headline["capture@10%"] / 0.10
+ci10 = val[(val.target == "cost") & (val.k == 0.10)].set_index("ranker")[["ci_lo", "ci_hi"]]
+headline = headline.join(ci10.rename(columns={"ci_lo": "ci10_lo", "ci_hi": "ci10_hi"})).sort_values("capture@10%", ascending=False)
+display(spark.createDataFrame(headline.round(3).reset_index()))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Does any ranker beat size?
+# MAGIC
+# MAGIC Share of bootstrap samples in which each ranker catches more test cost in its top 10% than the size ranker does on the same sample. Above ~0.95 is a clear win; near 0.5 is a tie.
+
+# COMMAND ----------
+
+size10 = np.array(boot[("Size (oil volume)", 0.10)])
+beats = pd.DataFrame(
+    [{"ranker": r, "share_of_samples_beating_size": float(np.mean(np.array(boot[(r, 0.10)]) > size10))}
+     for r in RANKERS if r != "Size (oil volume)"]
+).sort_values("share_of_samples_beating_size", ascending=False)
+display(spark.createDataFrame(beats.round(3)))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Lift chart and persistence
+
+# COMMAND ----------
+
+grid = np.linspace(0.01, 0.5, 50)
+fig, ax = plt.subplots(figsize=(7, 5))
+ax.plot([0, 50], [0, 0.5], ls="--", c="grey", label="Random")
+for name, cols in RANKERS.items():
+    idx = order(v, cols)
+    ax.plot(grid * 100, [capture(v, idx, "test_cost", g) for g in grid], label=name)
+ax.set_xlim(0, 50)
+ax.set_ylim(0, 0.8)
+ax.set_xticks([5, 10, 20, 30, 40, 50])
+ax.set_xlabel("Share of wells targeted (%), ranked on history before Jun 2025")
+ax.set_ylabel("Share of Jun 2025 – Oct 2026 cost captured")
+ax.set_title(f"Out-of-time lift, {len(v):,} eligible wells")
+ax.legend(fontsize=8)
+fig.tight_layout()
+display(fig)
+
+n10 = int(round(0.10 * len(v)))
+top_train = set(v.loc[order(v, ["cost_score"])[:n10], "uwi"])
+top_test = set(v.loc[order(v, ["test_cost"])[:n10], "uwi"])
+persistence = len(top_train & top_test) / n10
+print(f"Persistence: {persistence:.1%} of the train top 10% by cost score are in the test top 10% (random ≈ 10%)")
+
+# COMMAND ----------
+
+out = val.copy()
+out["wells"] = len(v)
+out["train_window"] = f"{TRAIN[0]} to {TRAIN[1]}"
+out["test_window"] = f"{TEST[0]} to {TEST[1]}"
+out["netback_cad_per_bbl"] = NETBACK
+out["persistence_top10"] = persistence
+spark.createDataFrame(out).write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(VAL_TARGET)
+
+random10 = val[(val.ranker == "Random") & (val.k == 0.10)].capture.iloc[0]
+val_checks = {
+    "every capture between 0 and 1": bool(val.capture.between(0, 1).all()),
+    "random capture@10% close to 10%": abs(random10 - 0.10) < 0.02,
+    "one row per ranker, target and k": not val.duplicated(["ranker", "target", "k"]).any(),
+}
+for name, ok in val_checks.items():
+    print(("PASS " if ok else "FAIL ") + name)
+assert all(val_checks.values()), "One or more checks failed"

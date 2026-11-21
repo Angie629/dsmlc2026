@@ -22,6 +22,8 @@ Never work in someone else's Git folder. Everyone gets their own clone.
 
 ## Who owns which file
 
+Full table map and data-flow diagram: [notebooks_and_data_flow.md](notebooks_and_data_flow.md).
+
 Notebook names are `<stage><letter>_<name>`: the number is the pipeline stage (01 clean and prepare, 02 ranking, 03 failures and payback, 04 early warning) and the letter is the run order within the stage. The task ID is in each notebook's title.
 
 One owner per notebook. Others read it, but only the owner edits it. This avoids merge conflicts with no extra process.

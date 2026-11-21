@@ -4,6 +4,7 @@ Strathcona datathon · Team plan v2 · Nov 21 · ~15 working hours · 3 people �
 
 > One project, two deliverables. A Databricks dashboard that tells a foreman which wells to act on this week, and a pitch that costs the rollout. The story: Strathcona's rod failures are chronic, not episodic. 57% of failures are followed by another on the same well within 90 days, so we target repeat-failure wells, show what that saves, and show how to run it.
 
+Live version with the shared checklist: https://claude.ai/artifact/Fs6rV9pyD5qwtpEH3GEozY. This file is a snapshot of that page taken Nov 21; ticks and later edits live on the page.
 
 Every task opens into work instructions: inputs, exact steps, output, a "done when" test, and the evidence it rests on. Tick tasks as you finish; progress is shared with the team. This is v2: new tasks are n1 to n5. Task IDs are unchanged, so ticks from v1 carry over. Owners are suggestions; rebalance as needed.
 
@@ -102,7 +103,7 @@ We re-profiled the jobs and failures files (15,610 jobs, 2,873 failures) and tes
 | **Repair lag is not measurable; downtime before the log is** | 2,137 of 2,812 linked failures (76%) have a job starting the same day. `failure_end_date` is empty, job duration median is 0.4 days. But the daily file shows 66% of 2025 rod/pump failures were already down on the logged day or the day before; for those, the median gap from stop to logged date is 2 days (90th percentile 7). | Drop the failure-to-repair lag test (old H3). Anchor early warning and lost oil on the **stop day**, not `failure_start_date` (s5, s6, n1). |
 | **Weather is a weak lead for failures** | Failures run flat at about 170 a month with no winter surge (Jan–Mar 2026: 175, 165, 182; Jun–Sep 2025: 172–178). Apr–May Rod Truck jobs run 8% below expected (1,041 vs 1,128, 2022–25). | Weather stays capped at 2 hours and aims at power/grid downtime in the daily file. The pitch says failures are chronic, not weather-driven. |
 | **Rods are the count, pump and tubing are the dollars** | Rods are 76% of failures at a median $5.0k. Pump is $29.9k and tubing $35.8k. Pump and tubing are 22% of failures but about 55% of failure-linked repair $. Fatigue and corrosion both cost about $5.4k median. | Pick the two actions by failure type and dollars first, then by cause (s5). |
-| **History-only ranking is a modest lift** | Ranking wells on 2023–24 repair $ puts 16.2% of later repair $ in the top 10% (95% interval 13.3–19.2%), 1.6 times random. A re-run over all 1,358 wells with any repair $ gives 14.2%, so the result depends on the well universe. | Add recency to the score and report the lift as measured. Fix one universe definition in s4. Expect the size baseline to be tight. |
+| **History-only ranking is a modest lift** | s4 result (911 eligible wells, ranked on data before Jun 2025, scored on Jun 2025–Oct 2026 cost): top 10% by cost score + recent repairs catches 16.5% of later cost (95% CI 14.2–19.8%, 1.65× random); size alone 15.9%; cost score alone 14.9%. Cost + recent beats size in only 76% of bootstrap samples. Persistence 19.8% (2× random). | History ranking gives a real but modest lift and no clear win over size. Lead the work list with the recency watchlist (n2, precision 64%) and use the cost ranking to order wells within it. |
 | **Torque, current and RPM are repeated entries** | On rate days they equal the previous day's value 90%, 95% and 96% of the time (median 29, 11 and 13 distinct values per well since Oct 2024). Efficiency repeats 0.6%. Torque covers 61% of 2025 rod/pump failures overall but only 6% in Cactus Lake. | No torque or current drift rules. Early warning uses runtime, efficiency and fluid rate (s6). Pitch recommendation: feed daily historian torque and current into the data. |
 | **No sensor drift before failures; runtime instability instead** | Re-aligned to the stop day vs 1,500 normal well-days: median torque and current stay at 1.000–1.005 of baseline. In days −8 to −2: ≥1 partial-run day 34.1% vs 14.9%; ≥2 partial days 11.0% vs 3.5%; ≥1 down day 13.8% vs 3.7%. Efficiency ≤80% of baseline 5.4% vs 4.0%. | s6 rules are built on partial-run and down days plus efficiency, and must still beat the recency watchlist. Charts: `docs/figures/prefailure_*.png`. |
 
@@ -267,7 +268,7 @@ Owners: A = Angie, J = Jacob, N = Ananya. ◆ marks a checkpoint.
 | Sat 9–11 AM | s1 | Monthly well table + cost score v1 | Angie | `notebooks/02a_ranking.py` |
 | Sat 9–11 AM | s2 | Failure rates by equipment, within area | Jacob | `notebooks/03b_runlife_payback.py` |
 | Sat 9–11 AM | s3 | Look at sensors before 50 failures | Ananya | `notebooks/04a_early_warning.py` |
-| Sat 11 AM–1 PM | s4 | Out-of-time validation of the ranking | Angie | `notebooks/02a_ranking.py` (section to add) |
+| Sat 11 AM–1 PM | s4 | Out-of-time validation of the ranking | Angie | `notebooks/02a_ranking.py` |
 | Sat 11 AM–1 PM | s5 | Pick 2 actions and compute break-even payback | Jacob | `notebooks/03b_runlife_payback.py` (section to add) |
 | Sat 11 AM–1 PM | s6 | Draft threshold rules, tune on Jun–Dec 2025 | Ananya | `notebooks/04a_early_warning.py` (section to add) |
 | Sat 1 PM | c2 | Ranking and actions signed off | Everyone |  |
@@ -521,7 +522,7 @@ per.agg(F.count("*").alias("failures_with_downtime"), F.expr("percentile_approx(
 
 ### Sat 11 AM–1 PM
 
-#### `s4` Out-of-time validation of the ranking · Angie · `notebooks/02a_ranking.py` (section to add)
+#### `s4` Out-of-time validation of the ranking · Angie · `notebooks/02a_ranking.py`
 
 **Inputs:** `gold_well_period`
 
@@ -541,7 +542,7 @@ capture = test.join(top.select('uwi'), 'uwi').agg(F.sum('cost_score')) / test.ag
 
 **Done when:** capture@10% with interval, compared with both baselines.
 
-> **Evidence:** Early concentration and persistence numbers suggest the ranking should beat random; the size baseline is the real test.
+> **Evidence:** Done Nov 21 (code in `02a_ranking`, tested on the Databricks gold tables). capture@10%: Cost + recent 16.5% (14.2–19.8%), Size 15.9%, Recent repairs 15.6%, Cost score 14.9%, Cost per producing day 14.1%, Random 9.9%. Cost + recent beats size in 76% of bootstrap samples (no clear win). Persistence 19.8%. Chart: `docs/figures/s4_lift_chart.png`. Table: `gold_ranking_validation`.
 
 #### `s5` Pick 2 actions and compute break-even payback · Jacob · `notebooks/03b_runlife_payback.py` (section to add)
 
@@ -878,4 +879,5 @@ capture = test.join(top.select('uwi'), 'uwi').agg(F.sum('cost_score')) / test.ag
 ---
 
 _Plan drafted Nov 20, 2026; revised Nov 21 (v2) after re-profiling the jobs and failures files. Daily-file facts come from the Nov 20 profiling and are not re-checked. Scores, thresholds to try, and timings are team judgment; anything marked "verify" has not been checked yet._
+_Notebook naming, the data-flow diagram and every Databricks table (grain, writer, users): `docs/notebooks_and_data_flow.md` in the repo._
 _Never put Databricks tokens or connection strings in notebooks or the repo. Use Databricks secrets or environment variables._

@@ -75,7 +75,7 @@ notebooks/        Databricks notebooks, run in order
   01b_clean_jobs_failures  bronze → silver_jobs, silver_failures (failures linked to repair jobs)
   01c_downtime_features    downtime buckets, silver_downtime, rolling pump-sensor features (needs silver_daily)
   01d_daily_checks   lost oil by bucket, power-downtime seasonality, downtime per failure from the stop day (gold_failure_downtime)
-  02a_ranking        gold_well_month, gold_well_period, cost score and ranks (validation added next)
+  02a_ranking        gold_well_month, gold_well_period, cost score and ranks; out-of-time validation (gold_ranking_validation)
   03a_repeat_failures  re-failure@30/90, Rod Truck repeat rate by year, recency tiers (gold_failure_gap, gold_recency_tier)
   03b_runlife_payback  failure rates by pump make, model and RPM within area (gold_failure_rates); payback added next
   04a_early_warning  sensors before failures (coverage, repeated readings, stop-day alignment); threshold rules next
