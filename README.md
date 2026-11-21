@@ -70,6 +70,7 @@ Data limits that shape the method:
 notebooks/        Databricks notebooks, run in order
   01_clean_daily    bronze → silver_daily, cleaning log
   01_clean_jobs_failures  bronze → silver_jobs, silver_failures (failures linked to repair jobs)
+  01_downtime_features    downtime buckets, silver_downtime, rolling pump-sensor features (needs silver_daily)
   02_ranking        gold tables, cost score, out-of-time validation
   03_runlife_payback  failure rates by equipment, break-even payback
   04_early_warning  threshold rules, 2025 tuning, 2026 test
