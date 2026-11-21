@@ -81,7 +81,7 @@ notebooks/        Databricks notebooks, run in order
   04a_early_warning  sensors before failures, threshold grid, holdout evaluation and gold alert outputs
   (05 reserved for weather: not used, power downtime is not seasonal)
 src/              shared cleaning and feature functions
-dashboard/        exported AI/BI dashboard definition and screenshots
+dashboard/        AI/BI dashboard: strathcona_reliability_desk.lvdash.json + build_reliability_desk.py (tests every query)
 docs/             slides (PDF), figures, known issues
 decision/         team planning pages (research question vote, build plan)
 .claude/skills/   reference notes used with Claude Code (dataset, domain, rubric)
@@ -91,7 +91,7 @@ decision/         team planning pages (research question vote, build plan)
 
 1. Upload the three Parquet files to a Unity Catalog volume in a Databricks workspace.
 2. Run the `notebooks/01a` to `01d` notebooks in letter order, then `02a_ranking` to `04a_early_warning`, in order on serverless compute.
-3. Import the dashboard from `dashboard/`.
+3. Import `dashboard/strathcona_reliability_desk.lvdash.json` (Dashboards → Create → Import from file), or regenerate it with `python dashboard/build_reliability_desk.py build`.
 
 Credentials are never stored in the notebooks or this repo. Use Databricks secrets or environment variables.
 
