@@ -4,7 +4,6 @@ Strathcona datathon · Team plan v2 · Nov 21 · ~15 working hours · 3 people �
 
 > One project, two deliverables. A Databricks dashboard that tells a foreman which wells to act on this week, and a pitch that costs the rollout. The story: Strathcona's rod failures are chronic, not episodic. 57% of failures are followed by another on the same well within 90 days, so we target repeat-failure wells, show what that saves, and show how to run it.
 
-Live version with the shared checklist: https://claude.ai/artifact/Fs6rV9pyD5qwtpEH3GEozY. This file is a snapshot of that page taken Nov 21; ticks and later edits live on the page.
 
 Every task opens into work instructions: inputs, exact steps, output, a "done when" test, and the evidence it rests on. Tick tasks as you finish; progress is shared with the team. This is v2: new tasks are n1 to n5. Task IDs are unchanged, so ticks from v1 carry over. Owners are suggestions; rebalance as needed.
 
