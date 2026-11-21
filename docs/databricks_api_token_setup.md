@@ -49,6 +49,7 @@ Scopes to add (type each word into **Search scopes**; exact names may differ sli
 | Unity Catalog (search "unity" or "catalog") | Listing catalogs, schemas, tables, volumes |
 | `files` | Uploading or reading files in volumes |
 | `workspace` | Only if you import notebooks from the repo into Databricks |
+| `dashboards` | Creating, updating and publishing AI/BI dashboards from the CLI (`databricks lakeview ...`). Without it the CLI says the token "does not have required scopes: dashboards" |
 
 Scopes are fixed when the token is created. If a command later fails because a scope is missing, generate a new token with it and repeat step 4.
 

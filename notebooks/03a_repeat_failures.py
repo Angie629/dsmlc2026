@@ -1,8 +1,8 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 03 · Repeat failures and recency tiers · task n2
+# MAGIC # 03a · Repeat failures and recency tiers · task n2
 # MAGIC
-# MAGIC Build plan task n2. Needs `01_clean_jobs_failures`. Writes:
+# MAGIC Build plan task n2. Needs `01b_clean_jobs_failures`. Writes:
 # MAGIC - `workspace.dsmlc.gold_failure_gap`: one row per failure with days to the next failure on the same well
 # MAGIC - `workspace.dsmlc.gold_recency_tier`: one row per well × snapshot with failures in the prior 90 days, tier, and whether it failed in the next 90 days. The last snapshot is the data end date (outcome unknown) and feeds the weekly work list.
 # MAGIC

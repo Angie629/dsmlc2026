@@ -258,23 +258,23 @@ Owners: A = Angie, J = Jacob, N = Ananya. ◆ marks a checkpoint.
 | Fri 8–9 PM | f3 | Check weather data availability | Jacob |  |
 | Fri 8–9 PM | f2 | Repo skeleton, README sections, AI log | Angie |  |
 | Fri 8–9 PM | f3b | Post organizer questions in Discord | Ananya |  |
-| Fri 9–11 PM | f4 | Clean daily table (silver_daily) | Angie | `notebooks/01_clean_daily.py` |
-| Fri 9–11 PM | f5 | Clean jobs and failures (silver_jobs, silver_failures) | Jacob | `notebooks/01_clean_jobs_failures.py` |
-| Fri 9–11 PM | f6 | Downtime buckets + daily sensor features | Ananya | `notebooks/01_downtime_features.py` |
+| Fri 9–11 PM | f4 | Clean daily table (silver_daily) | Angie | `notebooks/01a_clean_daily.py` |
+| Fri 9–11 PM | f5 | Clean jobs and failures (silver_jobs, silver_failures) | Jacob | `notebooks/01b_clean_jobs_failures.py` |
+| Fri 9–11 PM | f6 | Downtime buckets + daily sensor features | Ananya | `notebooks/01c_downtime_features.py` |
 | Fri 11 PM | c1 | Clean tables frozen | Everyone |  |
-| Sat 9–11 AM | n1 | Run the daily-file checks in Databricks | Ananya | `notebooks/01_daily_checks.py` |
-| Sat 9–11 AM | n2 | Repeat-failure analysis and recency tiers | Jacob | `notebooks/03_repeat_failures.py` |
-| Sat 9–11 AM | s1 | Monthly well table + cost score v1 | Angie | `notebooks/02_ranking.py` |
-| Sat 9–11 AM | s2 | Failure rates by equipment, within area | Jacob | `notebooks/03_runlife_payback.py` |
-| Sat 9–11 AM | s3 | Look at sensors before 50 failures | Ananya | `notebooks/04_early_warning.py` |
-| Sat 11 AM–1 PM | s4 | Out-of-time validation of the ranking | Angie | `notebooks/02_ranking.py` (section to add) |
-| Sat 11 AM–1 PM | s5 | Pick 2 actions and compute break-even payback | Jacob | `notebooks/03_runlife_payback.py` (section to add) |
-| Sat 11 AM–1 PM | s6 | Draft threshold rules, tune on Jun–Dec 2025 | Ananya | `notebooks/04_early_warning.py` (section to add) |
+| Sat 9–11 AM | n1 | Run the daily-file checks in Databricks | Ananya | `notebooks/01d_daily_checks.py` |
+| Sat 9–11 AM | n2 | Repeat-failure analysis and recency tiers | Jacob | `notebooks/03a_repeat_failures.py` |
+| Sat 9–11 AM | s1 | Monthly well table + cost score v1 | Angie | `notebooks/02a_ranking.py` |
+| Sat 9–11 AM | s2 | Failure rates by equipment, within area | Jacob | `notebooks/03b_runlife_payback.py` |
+| Sat 9–11 AM | s3 | Look at sensors before 50 failures | Ananya | `notebooks/04a_early_warning.py` |
+| Sat 11 AM–1 PM | s4 | Out-of-time validation of the ranking | Angie | `notebooks/02a_ranking.py` (section to add) |
+| Sat 11 AM–1 PM | s5 | Pick 2 actions and compute break-even payback | Jacob | `notebooks/03b_runlife_payback.py` (section to add) |
+| Sat 11 AM–1 PM | s6 | Draft threshold rules, tune on Jun–Dec 2025 | Ananya | `notebooks/04a_early_warning.py` (section to add) |
 | Sat 1 PM | c2 | Ranking and actions signed off | Everyone |  |
 | Sat 1–3 PM | n4 | Budget scenarios (precomputed) | Jacob |  |
 | Sat 1–3 PM | s7 | Dashboard page 2: weekly work list and repeat failures | Angie |  |
 | Sat 1–3 PM | s8 | Dashboard page 3: payback and budget scenarios | Jacob |  |
-| Sat 1–3 PM | s9 | Test thresholds on 2026 + dashboard page 4: watchlist | Ananya | `notebooks/04_early_warning.py` (section to add) |
+| Sat 1–3 PM | s9 | Test thresholds on 2026 + dashboard page 4: watchlist | Ananya | `notebooks/04a_early_warning.py` (section to add) |
 | Sat 3 PM | c3 | Weather decision made | Everyone |  |
 | Sat 3–5 PM | n3 | Strategy case and implementation plan (30/60/90) | Ananya |  |
 | Sat 3–5 PM | n5 | Dashboard page 1: where barrels and dollars go | Angie |  |
@@ -334,7 +334,7 @@ Owners: A = Angie, J = Jacob, N = Ananya. ◆ marks a checkpoint.
 #### `f2` Repo skeleton, README sections, AI log · Angie
 
 1. Create a public GitHub repo. Keep `dataset/` in `.gitignore` (raw data stays out; ask organizers before publishing it).
-2. Folders: `notebooks/` (01_clean, 02_ranking, 03_runlife_payback, 04_early_warning, 05_weather), `src/` (shared cleaning functions), `dashboard/` (exported dashboard JSON + screenshots), `docs/` (slides PDF, figures).
+2. Folders: `notebooks/` (01a–01d cleaning and checks, 02a_ranking, 03a_repeat_failures, 03b_runlife_payback, 04a_early_warning), `src/` (shared cleaning functions), `dashboard/` (exported dashboard JSON + screenshots), `docs/` (slides PDF, figures).
 3. README sections required by the brief: title, team members, research question, motivation, summary of findings, methods, validation, external resources, links to video and slides, AI disclosure.
 4. Add `AI_LOG.md` with columns: time, tool, what we asked, what we used, how we verified.
 5. Add `docs/known_issues.md` for data fixes found after the freeze.
@@ -354,7 +354,7 @@ Owners: A = Angie, J = Jacob, N = Ananya. ◆ marks a checkpoint.
 
 ### Fri 9–11 PM
 
-#### `f4` Clean daily table (silver_daily) · Angie · `notebooks/01_clean_daily.py`
+#### `f4` Clean daily table (silver_daily) · Angie · `notebooks/01a_clean_daily.py`
 
 **Inputs:** `bronze_daily`
 
@@ -373,7 +373,7 @@ Owners: A = Angie, J = Jacob, N = Ananya. ◆ marks a checkpoint.
 
 > **Evidence:** All counts above are from our profiling run. `hours_on_prod + hours_down` = 24 on every row, so either column can be used.
 
-#### `f5` Clean jobs and failures (silver_jobs, silver_failures) · Jacob · `notebooks/01_clean_jobs_failures.py`
+#### `f5` Clean jobs and failures (silver_jobs, silver_failures) · Jacob · `notebooks/01b_clean_jobs_failures.py`
 
 **Inputs:** `bronze_jobs`, `bronze_failures`
 
@@ -392,7 +392,7 @@ Owners: A = Angie, J = Jacob, N = Ananya. ◆ marks a checkpoint.
 
 > **Evidence:** 2,812 of 2,873 failures matched a Rod Truck/Workover job in that window.
 
-#### `f6` Downtime buckets + daily sensor features · Ananya · `notebooks/01_downtime_features.py`
+#### `f6` Downtime buckets + daily sensor features · Ananya · `notebooks/01c_downtime_features.py`
 
 **Inputs:** `silver_daily` (columns `downtime_code_1/2/3`, sensor columns)
 
@@ -420,17 +420,17 @@ Owners: A = Angie, J = Jacob, N = Ananya. ◆ marks a checkpoint.
 
 ### Sat 9–11 AM
 
-#### `n1` Run the daily-file checks in Databricks · Ananya · `notebooks/01_daily_checks.py`
+#### `n1` Run the daily-file checks in Databricks · Ananya · `notebooks/01d_daily_checks.py`
 
 **Inputs:** `silver_downtime`, `silver_failures`
 
-1. Run after `01_downtime_features`. The sketch returns two small tables, safe to paste into chat.
+1. Run after `01c_downtime_features`. The sketch returns two small tables, safe to paste into chat.
 2. Result 1 tells us whether the loss waterfall is worth a dashboard page and which buckets dominate.
 3. Result 2 gives downhole down days and lost oil per failure, counted from the stop day (the start of the downtime streak before the logged date) to 14 days after the logged date. Use the median as the response-time number in the pitch.
 4. Sensor coverage on failed wells is already answered by s3 (efficiency ~90%, torque 61%, Cactus Lake torque 6%); no need to re-run it.
 
 ```python
-# UNTESTED sketch. Run after 01_downtime_features, then paste the two small results into chat.
+# UNTESTED sketch. Run after 01c_downtime_features, then paste the two small results into chat.
 from pyspark.sql import functions as F
 S = "workspace.dsmlc"
 dt = spark.table(f"{S}.silver_downtime"); f = spark.table(f"{S}.silver_failures")
@@ -450,9 +450,9 @@ per.agg(F.count("*").alias("failures_with_downtime"), F.expr("percentile_approx(
 
 > **Evidence:** The event logs show failure and repair start the same day in 76% of cases, and wells stop a median 2 days before the logged date, so downtime must come from the daily file.
 
-> **Watch out:** Done on Nov 21 on the raw files (Downhole 219,627 m³ = 51% of non-economic lost oil; power downtime not seasonal, so weather is no-go; down days median rods 1, pump 4, tubing 5; stop-day window adds 51% lost oil). The notebook `01_daily_checks` repeats it in Databricks and saves `gold_failure_downtime`; the sketch below is a quick alternative.
+> **Watch out:** Done on Nov 21 on the raw files (Downhole 219,627 m³ = 51% of non-economic lost oil; power downtime not seasonal, so weather is no-go; down days median rods 1, pump 4, tubing 5; stop-day window adds 51% lost oil). The notebook `01d_daily_checks` repeats it in Databricks and saves `gold_failure_downtime`; the sketch below is a quick alternative.
 
-#### `n2` Repeat-failure analysis and recency tiers · Jacob · `notebooks/03_repeat_failures.py`
+#### `n2` Repeat-failure analysis and recency tiers · Jacob · `notebooks/03a_repeat_failures.py`
 
 **Inputs:** `silver_failures`, `silver_jobs`
 
@@ -470,7 +470,7 @@ per.agg(F.count("*").alias("failures_with_downtime"), F.expr("percentile_approx(
 
 > **Watch out:** Only wells with a logged failure are in the tier universe. Say so on the slide. Reproduced on Nov 21 on the raw files: re@90 57.1% (rods 65.4%), Rod Truck repeat 58–65% every year 2021–26, tiers 26/40/61/70%, flag 2+ precision 64.0% recall 33.5%. By area: Winter 81%, Cactus Lake 41%.
 
-#### `s1` Monthly well table + cost score v1 · Angie · `notebooks/02_ranking.py`
+#### `s1` Monthly well table + cost score v1 · Angie · `notebooks/02a_ranking.py`
 
 **Inputs:** silver tables
 
@@ -485,7 +485,7 @@ per.agg(F.count("*").alias("failures_with_downtime"), F.expr("percentile_approx(
 
 > **Evidence:** Repair $ concentration since Jun 2025: top 10% of wells = 33%, top 20% = 50% (975 wells). The 2021–26 figures (31%, 49%) are biased by missing Rod Truck cost before 2023.
 
-#### `s2` Failure rates by equipment, within area · Jacob · `notebooks/03_runlife_payback.py`
+#### `s2` Failure rates by equipment, within area · Jacob · `notebooks/03b_runlife_payback.py`
 
 **Inputs:** `silver_failures`, `silver_daily` (pump make/model, producing days)
 
@@ -504,9 +504,9 @@ per.agg(F.count("*").alias("failures_with_downtime"), F.expr("percentile_approx(
 
 > **Watch out:** Equipment choice is not random: harder wells may get a particular pump. Present differences as association.
 
-#### `s3` Look at sensors before 50 failures · Ananya · `notebooks/04_early_warning.py`
+#### `s3` Look at sensors before 50 failures · Ananya · `notebooks/04a_early_warning.py`
 
-**Inputs:** `silver_daily`, `silver_failures` (2025 rod/pump). Notebook: `04_early_warning`
+**Inputs:** `silver_daily`, `silver_failures` (2025 rod/pump). Notebook: `04a_early_warning`
 
 1. First, coverage: share of 2025 failures whose well has torque, current, efficiency on ≥ 20 of the 30 days before failure. If below ~30%, flag risk 1 now.
 2. Sample 50 covered Rods/Pump failures from 2025 (spread across areas).
@@ -521,7 +521,7 @@ per.agg(F.count("*").alias("failures_with_downtime"), F.expr("percentile_approx(
 
 ### Sat 11 AM–1 PM
 
-#### `s4` Out-of-time validation of the ranking · Angie · `notebooks/02_ranking.py` (section to add)
+#### `s4` Out-of-time validation of the ranking · Angie · `notebooks/02a_ranking.py` (section to add)
 
 **Inputs:** `gold_well_period`
 
@@ -543,7 +543,7 @@ capture = test.join(top.select('uwi'), 'uwi').agg(F.sum('cost_score')) / test.ag
 
 > **Evidence:** Early concentration and persistence numbers suggest the ranking should beat random; the size baseline is the real test.
 
-#### `s5` Pick 2 actions and compute break-even payback · Jacob · `notebooks/03_runlife_payback.py` (section to add)
+#### `s5` Pick 2 actions and compute break-even payback · Jacob · `notebooks/03b_runlife_payback.py` (section to add)
 
 **Inputs:** `silver_failures` (cause, linked job cost), downhole lost oil around each failure, s2 results
 
@@ -564,7 +564,7 @@ capture = test.join(top.select('uwi'), 'uwi').agg(F.sum('cost_score')) / test.ag
 
 > **Watch out:** Action effects come from observational comparisons. Say 'associated with', not 'causes'.
 
-#### `s6` Draft threshold rules, tune on Jun–Dec 2025 · Ananya · `notebooks/04_early_warning.py` (section to add)
+#### `s6` Draft threshold rules, tune on Jun–Dec 2025 · Ananya · `notebooks/04a_early_warning.py` (section to add)
 
 **Inputs:** `silver_daily` (runtime), `feat_daily_sensor` (efficiency, fluid rate), Jun–Dec 2025 failures aligned to the stop day
 
@@ -630,7 +630,7 @@ capture = test.join(top.select('uwi'), 'uwi').agg(F.sum('cost_score')) / test.ag
 
 **Done when:** Every number on the page traces to the s5 notebook.
 
-#### `s9` Test thresholds on 2026 + dashboard page 4: watchlist · Ananya · `notebooks/04_early_warning.py` (section to add)
+#### `s9` Test thresholds on 2026 + dashboard page 4: watchlist · Ananya · `notebooks/04a_early_warning.py` (section to add)
 
 1. Run the frozen rules on 2026 data. Report precision, recall, median lead time (days from first alert to failure), alerts per area per week.
 2. Compare with a random-alert baseline at the same alert rate.

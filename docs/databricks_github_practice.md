@@ -22,19 +22,20 @@ Never work in someone else's Git folder. Everyone gets their own clone.
 
 ## Who owns which file
 
+Notebook names are `<stage><letter>_<name>`: the number is the pipeline stage (01 clean and prepare, 02 ranking, 03 failures and payback, 04 early warning) and the letter is the run order within the stage. The task ID is in each notebook's title.
+
 One owner per notebook. Others read it, but only the owner edits it. This avoids merge conflicts with no extra process.
 
 | Notebook | Owner | Writes tables |
 |---|---|---|
-| `notebooks/01_clean_daily.py` | Angie | `silver_daily`, `cleaning_log` |
-| `notebooks/01_clean_jobs_failures.py` | Jacob | `silver_jobs`, `silver_failures` |
-| `notebooks/01_downtime_features.py` | Ananya | `downtime_bucket_map`, `silver_downtime`, `feat_daily_sensor` |
-| `notebooks/01_daily_checks.py` | Ananya | `gold_failure_downtime` |
-| `notebooks/03_repeat_failures.py` | Jacob | `gold_failure_gap`, `gold_recency_tier` |
-| `notebooks/02_ranking.py` | Angie | `gold_well_month`, `gold_well_period` |
-| `notebooks/03_runlife_payback.py` | Jacob | `gold_failure_rates`, `gold_payback` |
-| `notebooks/04_early_warning.py` | Ananya | `gold_alerts` |
-| `notebooks/05_weather.py` | Ananya (if go) | `weather_daily` |
+| `notebooks/01a_clean_daily.py` | Angie | `silver_daily`, `cleaning_log` |
+| `notebooks/01b_clean_jobs_failures.py` | Jacob | `silver_jobs`, `silver_failures` |
+| `notebooks/01c_downtime_features.py` | Ananya | `downtime_bucket_map`, `silver_downtime`, `feat_daily_sensor` |
+| `notebooks/01d_daily_checks.py` | Ananya | `gold_failure_downtime` |
+| `notebooks/02a_ranking.py` | Angie | `gold_well_month`, `gold_well_period` |
+| `notebooks/03a_repeat_failures.py` | Jacob | `gold_failure_gap`, `gold_recency_tier` |
+| `notebooks/03b_runlife_payback.py` | Jacob | `gold_failure_rates`, `gold_payback` |
+| `notebooks/04a_early_warning.py` | Ananya | `gold_alerts` |
 | `README.md`, `AI_LOG.md`, `docs/` | Anyone, small edits | — |
 
 Table names after `silver_daily` are proposals; rename here if you change them.
@@ -95,7 +96,7 @@ Not yet tested in our workspace.
 
 1. Everyone pushes their final notebook.
 2. One person creates a **fresh** Git folder from GitHub and runs the notebooks in order on new serverless compute:
-   `01_clean_daily` → `01_clean_jobs_failures` → `01_downtime_features` → `02_ranking` → `03_runlife_payback` → `04_early_warning` (→ `05_weather`).
+   `01a_clean_daily` → `01b_clean_jobs_failures` → `01c_downtime_features` → `01d_daily_checks` → `02a_ranking` → `03a_repeat_failures` → `03b_runlife_payback` → `04a_early_warning`. The number is the stage; the letter is the run order within the stage.
 3. Export the dashboard definition to `dashboard/` and add screenshots.
 4. Check the repo on GitHub in a logged-out browser: public, README complete, no data, no secrets.
 

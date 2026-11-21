@@ -1,8 +1,8 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 01 · Daily-file checks · task n1
+# MAGIC # 01d · Daily-file checks · task n1
 # MAGIC
-# MAGIC Build plan task n1. Run after `01_downtime_features`. Writes `workspace.dsmlc.gold_failure_downtime` (one row per failure) for payback (s5); everything else is read-only.
+# MAGIC Build plan task n1. Run after `01c_downtime_features`. Writes `workspace.dsmlc.gold_failure_downtime` (one row per failure) for payback (s5); everything else is read-only.
 # MAGIC
 # MAGIC 1. Where lost oil goes, by downtime bucket and year (dashboard page 1)
 # MAGIC 2. Is power/grid downtime seasonal? (weather go/no-go, c3)

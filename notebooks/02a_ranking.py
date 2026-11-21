@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 02 · Monthly well table and cost score v1 · task s1 (s4 next)
+# MAGIC # 02a · Monthly well table and cost score v1 · task s1 (s4 next)
 # MAGIC
 # MAGIC Build plan task s1. Needs all `01_*` notebooks. Writes:
 # MAGIC - `workspace.dsmlc.gold_well_month`: one row per `uwi` × month

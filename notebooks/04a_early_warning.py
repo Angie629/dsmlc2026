@@ -1,8 +1,8 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 04 · Early warning, part 1: what sensors show before failures · task s3 (s6, s9 next)
+# MAGIC # 04a · Early warning, part 1: what sensors show before failures · task s3 (s6, s9 next)
 # MAGIC
-# MAGIC Build plan task s3. Needs `01_clean_daily` and `01_clean_jobs_failures`. Read-only: writes no tables.
+# MAGIC Build plan task s3. Needs `01a_clean_daily` and `01b_clean_jobs_failures`. Read-only: writes no tables.
 # MAGIC
 # MAGIC Questions:
 # MAGIC 1. How many Jun–Dec 2025 rod/pump failures (the tuning window; the log is live from Jun 2025) have enough sensor data before them?

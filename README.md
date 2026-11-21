@@ -71,15 +71,15 @@ Data limits that shape the method:
 
 ```
 notebooks/        Databricks notebooks, run in order
-  01_clean_daily    bronze → silver_daily, cleaning log
-  01_clean_jobs_failures  bronze → silver_jobs, silver_failures (failures linked to repair jobs)
-  01_downtime_features    downtime buckets, silver_downtime, rolling pump-sensor features (needs silver_daily)
-  01_daily_checks   lost oil by bucket, power-downtime seasonality, downtime per failure from the stop day (gold_failure_downtime)
-  02_ranking        gold_well_month, gold_well_period, cost score and ranks (validation added next)
-  03_repeat_failures  re-failure@30/90, Rod Truck repeat rate by year, recency tiers (gold_failure_gap, gold_recency_tier)
-  03_runlife_payback  failure rates by pump make, model and RPM within area (gold_failure_rates); payback added next
-  04_early_warning  sensors before failures (coverage, repeated readings, stop-day alignment); threshold rules next
-  05_weather        optional weather join
+  01a_clean_daily    bronze → silver_daily, cleaning log
+  01b_clean_jobs_failures  bronze → silver_jobs, silver_failures (failures linked to repair jobs)
+  01c_downtime_features    downtime buckets, silver_downtime, rolling pump-sensor features (needs silver_daily)
+  01d_daily_checks   lost oil by bucket, power-downtime seasonality, downtime per failure from the stop day (gold_failure_downtime)
+  02a_ranking        gold_well_month, gold_well_period, cost score and ranks (validation added next)
+  03a_repeat_failures  re-failure@30/90, Rod Truck repeat rate by year, recency tiers (gold_failure_gap, gold_recency_tier)
+  03b_runlife_payback  failure rates by pump make, model and RPM within area (gold_failure_rates); payback added next
+  04a_early_warning  sensors before failures (coverage, repeated readings, stop-day alignment); threshold rules next
+  (05 reserved for weather: not used, power downtime is not seasonal)
 src/              shared cleaning and feature functions
 dashboard/        exported AI/BI dashboard definition and screenshots
 docs/             slides (PDF), figures, known issues
@@ -90,7 +90,7 @@ decision/         team planning pages (research question vote, build plan)
 ## How to reproduce
 
 1. Upload the three Parquet files to a Unity Catalog volume in a Databricks workspace.
-2. Run the `notebooks/01_*` cleaning notebooks, then `02_ranking` to `04_early_warning`, in order on serverless compute.
+2. Run the `notebooks/01a` to `01d` notebooks in letter order, then `02a_ranking` to `04a_early_warning`, in order on serverless compute.
 3. Import the dashboard from `dashboard/`.
 
 Credentials are never stored in the notebooks or this repo. Use Databricks secrets or environment variables.
@@ -144,7 +144,7 @@ cost_score = repair_$ + downhole_lost_oil_m3 × 6.2898 × netback_per_bbl
 - Weatherford COROD case study, Colombia (six wells): rod run life up 51%, used only to bracket the avoided-failure assumption. Link to be added.
 - Weatherford COROD corrosion-inhibition case study, Alberta (one well): qualitative support only. Link to be added.
 - PetroWiki: progressing cavity pump systems
-- Weather: not used. Power/grid downtime showed no repeatable seasonal pattern (`01_daily_checks`).
+- Weather: not used. Power/grid downtime showed no repeatable seasonal pattern (`01d_daily_checks`).
 
 ## Links
 
