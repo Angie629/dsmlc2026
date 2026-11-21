@@ -261,7 +261,7 @@ Row counts are from Databricks on Nov 21.
 
 ## Dashboard pages and their tables
 
-The live dashboard is **Strathcona Reliability Desk** (6 pages + an area filter), built from Ananya's design spec on the `feature-dashboard` branch. Its definition is `dashboard/strathcona_reliability_desk.lvdash.json`, generated and query-tested by `dashboard/build_reliability_desk.py` (`python dashboard/build_reliability_desk.py test`, then `build`). Budget scenarios (page 4) show a pending note until `gold_budget_scenarios` exists. The table below is the build plan's four-page grouping.
+The live dashboard is **Strathcona Reliability Desk** (6 pages + an area filter), designed from Ananya's dashboard brief. Its definition is `dashboard/strathcona_reliability_desk.lvdash.json`, generated and query-tested by `dashboard/build_reliability_desk.py` (`python dashboard/build_reliability_desk.py test`, then `build`). Budget scenarios (page 4) show a pending note until `gold_budget_scenarios` exists. The table below is the build plan's four-page grouping.
 
 | Page | Task | Owner | Tables |
 |---|---|---|---|
