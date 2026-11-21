@@ -100,6 +100,7 @@ Team docs:
 - [Databricks API and token setup](docs/databricks_api_token_setup.md): connecting the CLI or Python SDK from a laptop
 - [Databricks ↔ GitHub working practice](docs/databricks_github_practice.md): Git folders, notebook ownership, table rules
 - [Known issues](docs/known_issues.md): data problems found after the silver freeze
+- [Build plan](docs/build_plan.md): tasks, owners, definitions and sourced inputs (snapshot of the team's live plan page)
 
 ## Methods
 

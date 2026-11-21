@@ -28,7 +28,9 @@ One owner per notebook. Others read it, but only the owner edits it. This avoids
 |---|---|---|
 | `notebooks/01_clean_daily.py` | Angie | `silver_daily`, `cleaning_log` |
 | `notebooks/01_clean_jobs_failures.py` | Jacob | `silver_jobs`, `silver_failures` |
-| `notebooks/01_downtime_features.py` | Ananya | `downtime_bucket_map`, `feat_daily_sensor` |
+| `notebooks/01_downtime_features.py` | Ananya | `downtime_bucket_map`, `silver_downtime`, `feat_daily_sensor` |
+| `notebooks/01_daily_checks.py` | Ananya | `gold_failure_downtime` |
+| `notebooks/03_repeat_failures.py` | Jacob | `gold_failure_gap`, `gold_recency_tier` |
 | `notebooks/02_ranking.py` | Angie | `gold_well_month`, `gold_well_period` |
 | `notebooks/03_runlife_payback.py` | Jacob | `gold_failure_rates`, `gold_payback` |
 | `notebooks/04_early_warning.py` | Ananya | `gold_alerts` |
