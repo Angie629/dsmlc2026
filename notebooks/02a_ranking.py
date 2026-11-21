@@ -410,17 +410,34 @@ for name, cols in RANKERS.items():
         for k in KS:
             rows.append({"ranker": name, "target": tname, "k": k, "capture": capture(v, idx, tcol, k)})
 
-rng = np.random.default_rng(SEED)
-boot = {(name, k): [] for name in ["Random"] + list(RANKERS) for k in KS}
-for _ in range(N_BOOT):
-    s = add_blend(v.iloc[rng.integers(0, len(v), len(v))].reset_index(drop=True))
+def bootstrap_captures(v, n_boot, seed):
+    """Capture@k on test cost for each ranker across bootstrap resamples of wells, all at once in NumPy.
+
+    Each ranker's order is fixed on the full well list; a resample keeps that relative order.
+    The blend score therefore uses full-sample percentiles rather than re-ranking inside each resample.
+    """
+    rng = np.random.default_rng(seed)
+    n = len(v)
+    draws = rng.integers(0, n, size=(n_boot, n))
+    cost = v["test_cost"].to_numpy()
+    totals = cost[draws].sum(axis=1)
+    tops = {k: max(1, int(round(k * n))) for k in KS}
+    out = {}
     for name, cols in RANKERS.items():
-        idx = order(s, cols)
-        for k in KS:
-            boot[(name, k)].append(capture(s, idx, "test_cost", k))
-    ridx = s.index[rng.permutation(len(s))]
-    for k in KS:
-        boot[("Random", k)].append(capture(s, ridx, "test_cost", k))
+        position = np.empty(n, dtype=np.int64)
+        position[v.index.get_indexer(order(v, cols))] = np.arange(n)
+        ranked = draws[np.arange(n_boot)[:, None], np.argsort(position[draws], axis=1)]
+        cum = np.cumsum(cost[ranked], axis=1)
+        for k, m in tops.items():
+            out[(name, k)] = cum[:, m - 1] / totals
+    shuffled = np.take_along_axis(draws, rng.permuted(np.tile(np.arange(n), (n_boot, 1)), axis=1), axis=1)
+    cum = np.cumsum(cost[shuffled], axis=1)
+    for k, m in tops.items():
+        out[("Random", k)] = cum[:, m - 1] / totals
+    return out
+
+
+boot = bootstrap_captures(v.reset_index(drop=True), N_BOOT, SEED)
 
 for k in KS:
     rows.append({"ranker": "Random", "target": "cost", "k": k, "capture": float(np.mean(boot[("Random", k)]))})
