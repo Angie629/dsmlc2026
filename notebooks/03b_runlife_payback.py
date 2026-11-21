@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # 03b · Failure rates by equipment, within area · task s2 (s5 next)
 # MAGIC
@@ -373,3 +377,223 @@ display(spark.createDataFrame(out[out["vs_area"] == "higher"]))
 print("Lower than area:")
 display(spark.createDataFrame(out[out["vs_area"] == "lower"]))
 assert all(checks.values()), "One or more checks failed"
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Task s5: Pick 2 actions and payback
+
+# COMMAND ----------
+
+# DBTITLE 1,Calculate Cost per Failure
+# MAGIC %sql
+# MAGIC -- Task s5: Cost per failure by failure_type (Mean & Median)
+# MAGIC -- Cost per failure = linked repair job_cost + (downhole lost_oil_m3 from stop day to +14d * 6.2898 * 32.50)
+# MAGIC
+# MAGIC WITH failure_costs AS (
+# MAGIC     SELECT
+# MAGIC         f.failure_id,
+# MAGIC         f.uwi,
+# MAGIC         f.failure_start_date,
+# MAGIC         f.failure_type,
+# MAGIC         f.cause,
+# MAGIC         f.linked_job_cost AS linked_repair_job_cost,
+# MAGIC         COALESCE(dt.downhole_lost_oil_m3, 0) AS downhole_lost_oil_m3,
+# MAGIC         COALESCE(dt.downhole_lost_oil_m3, 0) * 6.2898 * 32.50 AS lost_oil_cost_cad,
+# MAGIC         f.linked_job_cost + (COALESCE(dt.downhole_lost_oil_m3, 0) * 6.2898 * 32.50) AS cost_per_failure
+# MAGIC     FROM workspace.dsmlc.silver_failures f
+# MAGIC     LEFT JOIN workspace.dsmlc.gold_failure_downtime dt
+# MAGIC         ON f.failure_id = dt.failure_id
+# MAGIC     WHERE f.failure_start_date >= DATE '2025-06-01'
+# MAGIC       AND f.linked_job_cost IS NOT NULL
+# MAGIC       AND f.linked_job_cost > 0
+# MAGIC )
+# MAGIC
+# MAGIC SELECT
+# MAGIC     failure_type,
+# MAGIC     COUNT(*) AS linked_failure_count,
+# MAGIC     
+# MAGIC     -- Linked Repair Cost ($)
+# MAGIC     ROUND(MEDIAN(linked_repair_job_cost), 0) AS median_repair_cost,
+# MAGIC     ROUND(AVG(linked_repair_job_cost), 0) AS mean_repair_cost,
+# MAGIC     
+# MAGIC     -- Downhole Lost Oil Volume (m3) & Value ($) at C$32.50/boe
+# MAGIC     ROUND(MEDIAN(downhole_lost_oil_m3), 1) AS median_lost_oil_m3,
+# MAGIC     ROUND(MEDIAN(lost_oil_cost_cad), 0) AS median_lost_oil_cost,
+# MAGIC     ROUND(AVG(lost_oil_cost_cad), 0) AS mean_lost_oil_cost,
+# MAGIC     
+# MAGIC     -- Total Cost Per Failure (Repair $ + Lost Oil $)
+# MAGIC     ROUND(MEDIAN(cost_per_failure), 0) AS median_cost_per_failure,
+# MAGIC     ROUND(AVG(cost_per_failure), 0) AS mean_cost_per_failure,
+# MAGIC     ROUND(SUM(cost_per_failure), 0) AS total_failure_cost
+# MAGIC FROM failure_costs
+# MAGIC GROUP BY failure_type
+# MAGIC ORDER BY total_failure_cost DESC;
+
+# COMMAND ----------
+
+# DBTITLE 1,Candidate Action Ranking
+# MAGIC %sql
+# MAGIC -- Task s5 (Part 2A): Rank failure_type x failure_cause by count and total dollars
+# MAGIC -- Helps defend why the 2 actions were chosen by failure type and dollars first, then cause
+# MAGIC
+# MAGIC WITH failure_costs AS (
+# MAGIC     SELECT
+# MAGIC         f.failure_id,
+# MAGIC         f.uwi,
+# MAGIC         f.failure_type,
+# MAGIC         COALESCE(f.cause, 'Unspecified') AS failure_cause,
+# MAGIC         f.linked_job_cost AS repair_cost,
+# MAGIC         COALESCE(dt.downhole_lost_oil_m3, 0) AS lost_oil_m3,
+# MAGIC         COALESCE(dt.downhole_lost_oil_m3, 0) * 6.2898 * 32.50 AS lost_oil_cost
+# MAGIC     FROM workspace.dsmlc.silver_failures f
+# MAGIC     LEFT JOIN workspace.dsmlc.gold_failure_downtime dt
+# MAGIC         ON f.failure_id = dt.failure_id
+# MAGIC     WHERE f.failure_start_date >= DATE '2025-06-01'
+# MAGIC       AND f.linked_job_cost > 0
+# MAGIC )
+# MAGIC
+# MAGIC SELECT
+# MAGIC     failure_type,
+# MAGIC     failure_cause,
+# MAGIC     COUNT(*) AS failure_count,
+# MAGIC     COUNT(DISTINCT uwi) AS distinct_wells,
+# MAGIC     ROUND(MEDIAN(repair_cost), 0) AS median_repair_cost,
+# MAGIC     ROUND(MEDIAN(lost_oil_m3), 1) AS median_lost_m3,
+# MAGIC     ROUND(MEDIAN(repair_cost + lost_oil_cost), 0) AS median_cost_per_failure,
+# MAGIC     ROUND(AVG(repair_cost + lost_oil_cost), 0) AS mean_cost_per_failure,
+# MAGIC     ROUND(SUM(repair_cost + lost_oil_cost), 0) AS total_pool_dollars
+# MAGIC FROM failure_costs
+# MAGIC GROUP BY failure_type, failure_cause
+# MAGIC ORDER BY total_pool_dollars DESC;
+
+# COMMAND ----------
+
+# DBTITLE 1,Break-Even Payback and Sensitivity Grid
+# MAGIC %sql
+# MAGIC -- Task s5 (Part 2B): Break-Even (N*), Payback & Sensitivity Grid for 2 Actions
+# MAGIC -- Action 1: Rods (Fatigue / Corrosion — Rod string upgrade or corrosion inhibition program)
+# MAGIC -- Action 2: Pump & Tubing (High-dollar workover — Pump/tubing upgrade or RPM/pump-off control)
+# MAGIC
+# MAGIC WITH base_failures AS (
+# MAGIC     SELECT
+# MAGIC         f.failure_id,
+# MAGIC         f.uwi,
+# MAGIC         f.failure_type,
+# MAGIC         f.cause,
+# MAGIC         f.linked_job_cost,
+# MAGIC         COALESCE(dt.downhole_lost_oil_m3, 0) AS lost_m3,
+# MAGIC         CASE
+# MAGIC             WHEN f.failure_type = 'Rods' AND f.cause IN ('Fatigue', 'Corrosion')
+# MAGIC                 THEN 'Action 1: Rods (Fatigue & Corrosion Upgrade/Inhibition)'
+# MAGIC             WHEN f.failure_type IN ('Pump', 'Tubing')
+# MAGIC                 THEN 'Action 2: Pump & Tubing (High-Cost Workover Prevention)'
+# MAGIC             ELSE NULL
+# MAGIC         END AS action_group
+# MAGIC     FROM workspace.dsmlc.silver_failures f
+# MAGIC     LEFT JOIN workspace.dsmlc.gold_failure_downtime dt
+# MAGIC         ON f.failure_id = dt.failure_id
+# MAGIC     WHERE f.failure_start_date >= DATE '2025-06-01'
+# MAGIC       AND f.linked_job_cost > 0
+# MAGIC ),
+# MAGIC
+# MAGIC -- Bad-actor failure frequency on eligible wells (>= 3 failures in 16.8 months = 1.40 years)
+# MAGIC bad_actor_rates AS (
+# MAGIC     SELECT
+# MAGIC         action_group,
+# MAGIC         COUNT(DISTINCT uwi) AS bad_actor_well_count,
+# MAGIC         AVG(well_failures / 1.40) AS mean_failures_per_well_year,
+# MAGIC         MEDIAN(well_failures / 1.40) AS median_failures_per_well_year
+# MAGIC     FROM (
+# MAGIC         SELECT
+# MAGIC             action_group,
+# MAGIC             uwi,
+# MAGIC             COUNT(*) AS well_failures
+# MAGIC         FROM base_failures
+# MAGIC         WHERE action_group IS NOT NULL
+# MAGIC         GROUP BY action_group, uwi
+# MAGIC         HAVING COUNT(*) >= 3
+# MAGIC     )
+# MAGIC     GROUP BY action_group
+# MAGIC ),
+# MAGIC
+# MAGIC action_metrics AS (
+# MAGIC     SELECT
+# MAGIC         bf.action_group,
+# MAGIC         COUNT(*) AS total_failures,
+# MAGIC         MEDIAN(bf.linked_job_cost) AS median_repair_cost,
+# MAGIC         AVG(bf.linked_job_cost) AS mean_repair_cost,
+# MAGIC         MEDIAN(bf.lost_m3) AS median_lost_m3,
+# MAGIC         AVG(bf.lost_m3) AS mean_lost_m3,
+# MAGIC         ba.bad_actor_well_count,
+# MAGIC         ba.mean_failures_per_well_year,
+# MAGIC         ba.median_failures_per_well_year
+# MAGIC     FROM base_failures bf
+# MAGIC     LEFT JOIN bad_actor_rates ba
+# MAGIC         ON bf.action_group = ba.action_group
+# MAGIC     WHERE bf.action_group IS NOT NULL
+# MAGIC     GROUP BY
+# MAGIC         bf.action_group,
+# MAGIC         ba.bad_actor_well_count,
+# MAGIC         ba.mean_failures_per_well_year,
+# MAGIC         ba.median_failures_per_well_year
+# MAGIC ),
+# MAGIC
+# MAGIC sensitivity_params AS (
+# MAGIC     SELECT * FROM VALUES
+# MAGIC         -- (netback_label ($), netback_bbl, cost_mult_label, cost_mult, avoided_share)
+# MAGIC         ('Netback -25% (24.38)', 24.375, '0.5x Cost (17.1k)', 0.5, 0.25),
+# MAGIC         ('Netback -25% (24.38)', 24.375, '0.5x Cost (17.1k)', 0.5, 0.50),
+# MAGIC         ('Netback -25% (24.38)', 24.375, '1.0x Base (34.2k)', 1.0, 0.25),
+# MAGIC         ('Netback -25% (24.38)', 24.375, '1.0x Base (34.2k)', 1.0, 0.50),
+# MAGIC         ('Netback -25% (24.38)', 24.375, '2.0x Cost (68.3k)', 2.0, 0.25),
+# MAGIC         ('Netback -25% (24.38)', 24.375, '2.0x Cost (68.3k)', 2.0, 0.50),
+# MAGIC         ('Netback Base (32.50)', 32.500, '0.5x Cost (17.1k)', 0.5, 0.25),
+# MAGIC         ('Netback Base (32.50)', 32.500, '0.5x Cost (17.1k)', 0.5, 0.50),
+# MAGIC         ('Netback Base (32.50)', 32.500, '1.0x Base (34.2k)', 1.0, 0.25),
+# MAGIC         ('Netback Base (32.50)', 32.500, '1.0x Base (34.2k)', 1.0, 0.50),
+# MAGIC         ('Netback Base (32.50)', 32.500, '2.0x Cost (68.3k)', 2.0, 0.25),
+# MAGIC         ('Netback Base (32.50)', 32.500, '2.0x Cost (68.3k)', 2.0, 0.50),
+# MAGIC         ('Netback +25% (40.63)', 40.625, '0.5x Cost (17.1k)', 0.5, 0.25),
+# MAGIC         ('Netback +25% (40.63)', 40.625, '0.5x Cost (17.1k)', 0.5, 0.50),
+# MAGIC         ('Netback +25% (40.63)', 40.625, '1.0x Base (34.2k)', 1.0, 0.25),
+# MAGIC         ('Netback +25% (40.63)', 40.625, '1.0x Base (34.2k)', 1.0, 0.50),
+# MAGIC         ('Netback +25% (40.63)', 40.625, '2.0x Cost (68.3k)', 2.0, 0.25),
+# MAGIC         ('Netback +25% (40.63)', 40.625, '2.0x Cost (68.3k)', 2.0, 0.50)
+# MAGIC     AS t(netback_label, netback_bbl, cost_mult_label, cost_mult, avoided_share)
+# MAGIC )
+# MAGIC
+# MAGIC SELECT
+# MAGIC     m.action_group,
+# MAGIC     p.netback_label,
+# MAGIC     p.cost_mult_label,
+# MAGIC     CONCAT(CAST(ROUND(p.avoided_share * 100, 0) AS INT), '%') AS avoided_failure_share,
+# MAGIC     
+# MAGIC     -- Action cost proxy ($34,152 Workover median * multiplier)
+# MAGIC     ROUND(34152.0 * p.cost_mult, 0) AS assumed_action_cost,
+# MAGIC     
+# MAGIC     -- Cost per failure at this netback (using median repair + median lost oil)
+# MAGIC     ROUND(m.median_repair_cost + (m.median_lost_m3 * 6.2898 * p.netback_bbl), 0) AS median_cost_per_failure,
+# MAGIC     
+# MAGIC     -- N* = Break-even failures avoided per well-year
+# MAGIC     ROUND(
+# MAGIC         (34152.0 * p.cost_mult) / (m.median_repair_cost + (m.median_lost_m3 * 6.2898 * p.netback_bbl)),
+# MAGIC         2
+# MAGIC     ) AS n_star_breakeven_failures,
+# MAGIC     
+# MAGIC     -- Expected failures avoided per year on a bad-actor well (>=3 failures in 16.8m)
+# MAGIC     ROUND(m.mean_failures_per_well_year * p.avoided_share, 2) AS expected_failures_avoided_yr,
+# MAGIC     
+# MAGIC     -- Payback period in years on a bad-actor well: Action Cost / Annual Expected Savings
+# MAGIC     ROUND(
+# MAGIC         (34152.0 * p.cost_mult) /
+# MAGIC         ((m.mean_failures_per_well_year * p.avoided_share) * (m.median_repair_cost + (m.median_lost_m3 * 6.2898 * p.netback_bbl))),
+# MAGIC         2
+# MAGIC     ) AS payback_years_on_bad_actor
+# MAGIC FROM action_metrics m
+# MAGIC CROSS JOIN sensitivity_params p
+# MAGIC ORDER BY
+# MAGIC     m.action_group,
+# MAGIC     p.cost_mult,
+# MAGIC     p.netback_bbl,
+# MAGIC     p.avoided_share;
