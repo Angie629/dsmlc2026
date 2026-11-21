@@ -22,6 +22,8 @@ Never work in someone else's Git folder. Everyone gets their own clone.
 
 ## Who owns which file
 
+Full table map and data-flow diagram: [notebooks_and_data_flow.md](notebooks_and_data_flow.md).
+
 Notebook names are `<stage><letter>_<name>`: the number is the pipeline stage (01 clean and prepare, 02 ranking, 03 failures and payback, 04 early warning) and the letter is the run order within the stage. The task ID is in each notebook's title.
 
 One owner per notebook. Others read it, but only the owner edits it. This avoids merge conflicts with no extra process.
@@ -62,7 +64,7 @@ You can edit a notebook in Databricks or locally (VS Code, Claude Code), but **n
 
 ## Table rules
 
-- **Bronze is read-only.** `daily_production`, `well_jobs` and `production_failures` are never dropped or overwritten. Fixes go in silver.
+- **Bronze is read-only.** `bronze_daily`, `bronze_jobs` and `bronze_failures` are never dropped or overwritten. Fixes go in silver.
 - **A notebook writes only its own tables** (see the ownership table).
 - **Silver freezes at Fri 11 PM.** Later data issues go in [known_issues.md](known_issues.md), not into silver.
 - Use full names (`workspace.dsmlc.silver_daily`) in code, so it doesn't depend on the current schema.

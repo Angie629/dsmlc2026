@@ -75,13 +75,13 @@ notebooks/        Databricks notebooks, run in order
   01b_clean_jobs_failures  bronze → silver_jobs, silver_failures (failures linked to repair jobs)
   01c_downtime_features    downtime buckets, silver_downtime, rolling pump-sensor features (needs silver_daily)
   01d_daily_checks   lost oil by bucket, power-downtime seasonality, downtime per failure from the stop day (gold_failure_downtime)
-  02a_ranking        gold_well_month, gold_well_period, cost score and ranks (validation added next)
+  02a_ranking        gold_well_month, gold_well_period, cost score and ranks; out-of-time validation (gold_ranking_validation)
   03a_repeat_failures  re-failure@30/90, Rod Truck repeat rate by year, recency tiers (gold_failure_gap, gold_recency_tier)
   03b_runlife_payback  failure rates by pump make, model and RPM within area (gold_failure_rates); payback added next
-  04a_early_warning  sensors before failures (coverage, repeated readings, stop-day alignment); threshold rules next
+  04a_early_warning  sensors before failures, threshold grid, holdout evaluation and gold alert outputs
   (05 reserved for weather: not used, power downtime is not seasonal)
 src/              shared cleaning and feature functions
-dashboard/        exported AI/BI dashboard definition and screenshots
+dashboard/        AI/BI dashboard: strathcona_reliability_desk.lvdash.json + build_reliability_desk.py (tests every query)
 docs/             slides (PDF), figures, known issues
 decision/         team planning pages (research question vote, build plan)
 .claude/skills/   reference notes used with Claude Code (dataset, domain, rubric)
@@ -91,7 +91,7 @@ decision/         team planning pages (research question vote, build plan)
 
 1. Upload the three Parquet files to a Unity Catalog volume in a Databricks workspace.
 2. Run the `notebooks/01a` to `01d` notebooks in letter order, then `02a_ranking` to `04a_early_warning`, in order on serverless compute.
-3. Import the dashboard from `dashboard/`.
+3. Import `dashboard/strathcona_reliability_desk.lvdash.json` (Dashboards → Create → Import from file), or regenerate it with `python dashboard/build_reliability_desk.py build`.
 
 Credentials are never stored in the notebooks or this repo. Use Databricks secrets or environment variables.
 
@@ -100,6 +100,8 @@ Team docs:
 - [Databricks API and token setup](docs/databricks_api_token_setup.md): connecting the CLI or Python SDK from a laptop
 - [Databricks ↔ GitHub working practice](docs/databricks_github_practice.md): Git folders, notebook ownership, table rules
 - [Known issues](docs/known_issues.md): data problems found after the silver freeze
+- [Notebooks and data flow](docs/notebooks_and_data_flow.md): naming conventions, data-flow diagram, and every Databricks table with its grain, writer and users
+- [Checkpoint c2 sign-off](docs/c2_signoff.md): score definition, the 2 actions and the early-warning choice, with evidence
 - [Build plan](docs/build_plan.md): tasks, owners, definitions and sourced inputs (snapshot of the team's live plan page)
 
 ## Methods
