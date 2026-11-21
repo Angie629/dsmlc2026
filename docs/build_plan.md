@@ -1,12 +1,12 @@
 # Reliability Desk: build and pitch plan
 
-Strathcona datathon · Team plan v2 · Nov 21 · ~15 working hours · 3 people · Submit Sun Nov 22, 11:00 AM (deadline 12:00 PM)
+Strathcona datathon · Team plan v3 · Nov 21, 4 PM · ~15 working hours · 3 people · Submit Sun Nov 22, 11:00 AM (deadline 12:00 PM)
 
 > One project, two deliverables. A Databricks dashboard that tells a foreman which wells to act on this week, and a pitch that costs the rollout. The story: Strathcona's rod failures are chronic, not episodic. 57% of failures are followed by another on the same well within 90 days, so we target repeat-failure wells, show what that saves, and show how to run it.
 
-Live version with the shared checklist: https://claude.ai/artifact/Fs6rV9pyD5qwtpEH3GEozY. This file is a snapshot of that page taken Nov 21; ticks and later edits live on the page.
+Live version with the shared checklist: https://claude.ai/artifact/Fs6rV9pyD5qwtpEH3GEozY. This file is a snapshot of that page taken Nov 21, 4 PM; ticks and later edits live on the page.
 
-Every task opens into work instructions: inputs, exact steps, output, a "done when" test, and the evidence it rests on. Tick tasks as you finish; progress is shared with the team. This is v2: new tasks are n1 to n5. Task IDs are unchanged, so ticks from v1 carry over. Owners are suggestions; rebalance as needed.
+Every task opens into work instructions: inputs, exact steps, output, a "done when" test, and the evidence it rests on. Tick tasks as you finish; progress is shared with the team. v3 (Sat 4 PM): weather is dropped (c3 no-go). While Jacob finishes the budget work (n4, s8), Angie and Ananya take three stretch tasks: n6 model features, n7 a time-tested failure-risk model, n8 dashboard improvements. All three stop at 6:30 PM so the README and video script still land by Checkpoint 3. Task IDs are unchanged, so earlier ticks carry over. Owners are suggestions; rebalance as needed.
 
 ## Who does what, starting now
 
@@ -20,8 +20,10 @@ Start with s1. Jacob and Ananya both need `gold_well_month`.
 2. **s4** Out-of-time validation. Rank on cost score, then on cost score plus recency, and compare both with the size baseline (11 AM–1 PM)
 3. **s7** Dashboard page 2, the weekly work list. Needs `gold_recency_tier` from n2 (1–3 PM)
 4. **n5** Dashboard page 1, losses and data trust, then **s10** polish and screenshots (3–5 PM)
-5. **s13** README findings and methods (5–8 PM)
-6. **u1** check every slide number, **u4** repo cleanup (Sun)
+5. **n6** Model feature table, one row per producing well per week (4–5 PM)
+6. **n8** Dashboard improvements: summary page, trend, filters, risk column when n7 lands (5–6:30 PM)
+7. **s13** README findings and methods (6:30–8 PM)
+8. **u1** check every slide number, **u4** repo cleanup (Sun)
 
 Hands off: `gold_well_month` to Jacob after s1; the ranking to everyone at the 1 PM checkpoint.
 
@@ -48,9 +50,10 @@ Start with n1. It takes about half an hour and its three tables decide how much 
 2. **s3** Look at sensors before 50 failures (9–11 AM)
 3. **s6** Draft threshold rules, tune on Jun–Dec 2025, must beat the recency baseline (11 AM–1 PM)
 4. **s9** Test thresholds on 2026 and build dashboard page 4 (1–3 PM)
-5. **n3** Strategy case and 30/60/90 plan; **s12** weather only if the 3 PM check says go (3–5 PM)
-6. **s15** Video script and chart exports (5–8 PM)
-7. **u3** record the video, **u6** prep 10 judge questions (Sun)
+5. **n3** Strategy case and 30/60/90 plan (finish by 5 PM). **s12** weather is dropped
+6. **n7** Train and test the failure-risk model on n6's table; stop at 6:30 PM whatever the result (5–6:30 PM)
+7. **s15** Video script and chart exports (6:30–8 PM)
+8. **u3** record the video, **u6** prep 10 judge questions (Sun)
 
 Hands off: n1 results to Angie (n5) and Jacob (downtime days for payback).
 
@@ -233,15 +236,16 @@ Also beat a **size baseline**: rank by train-window oil volume. Bigger wells may
 
 **Nice-to-have · only if must-haves done by Sat 3 PM**
 
-- **Weather link**, 2-hour cap, aimed at power/grid downtime in the daily file. Failures show no winter surge, so pull weather only if power downtime is seasonal.
+- **Failure-risk model (stretch, 4–6:30 PM):** one row per producing well per week, gradient-boosted trees and logistic regression, trained on 2025 and tested on 2026. It ships only if it beats the recency watchlist on precision in the top 50 wells per week.
+- **Dashboard improvements:** one-page summary, spend and failure trends, failure-type filter, risk score in the work list.
 - Genie space on the gold tables for the demo.
 - Kaplan–Meier run-life curves (needs the `lifelines` package, a new dependency).
 
-Weather source not confirmed. Jacob checks Databricks Marketplace on Free Edition first. Fallback: Open-Meteo historical API or ECCC daily stations at the 26 field-area centroids.
+Weather was dropped at c3: power/grid downtime has no repeatable seasonal peak (01d) and failures run flat month to month.
 
 **Cut**
 
-- ML models
+- Weather (c3 no-go)
 - Canary
 - Text mining of job summaries and failure comments (13% of failures name a depth)
 - Repair-lag and response-time analysis (failure and repair start the same day in 76% of cases)
@@ -276,15 +280,18 @@ Owners: A = Angie, J = Jacob, N = Ananya. ◆ marks a checkpoint.
 | Sat 1–3 PM | s7 | Dashboard page 2: weekly work list and repeat failures | Angie |  |
 | Sat 1–3 PM | s8 | Dashboard page 3: payback and budget scenarios | Jacob |  |
 | Sat 1–3 PM | s9 | Test thresholds on 2026 + dashboard page 4: watchlist | Ananya | `notebooks/04a_early_warning.py` |
-| Sat 3 PM | c3 | Weather decision made | Everyone |  |
+| Sat 3 PM | c3 | Weather decision made: no-go | Everyone |  |
 | Sat 3–5 PM | n3 | Strategy case and implementation plan (30/60/90) | Ananya |  |
 | Sat 3–5 PM | n5 | Dashboard page 1: where barrels and dollars go | Angie |  |
 | Sat 3–5 PM | s10 | Dashboard polish + optional Genie space | Angie |  |
 | Sat 3–5 PM | s11 | Sensitivity table + limitations list | Jacob |  |
-| Sat 3–5 PM | s12 | Weather join + 3 checks (2 h cap), or threshold polish | Ananya |  |
-| Sat 5–8 PM | s13 | README findings and methods | Angie |  |
-| Sat 5–8 PM | s14 | Slides: problem, data, method, results | Jacob |  |
-| Sat 5–8 PM | s15 | Video script + slide visuals | Ananya |  |
+| Sat 3–5 PM | s12 | Weather join: dropped at c3 | Ananya |  |
+| Sat 4–6:30 PM · stretch for Angie and Ananya | n6 | Model feature table: one row per producing well per week | Angie | `notebooks/04b_risk_model.py` (new) |
+| Sat 4–6:30 PM · stretch for Angie and Ananya | n7 | Train and test a failure-risk model (stretch, stop at 6:30 PM) | Ananya | `notebooks/04b_risk_model.py` (new) |
+| Sat 4–6:30 PM · stretch for Angie and Ananya | n8 | Dashboard improvements | Angie |  |
+| Sat 5–8 PM (Angie and Ananya from 6:30) | s13 | README findings and methods | Angie |  |
+| Sat 5–8 PM (Angie and Ananya from 6:30) | s14 | Slides: problem, data, method, results | Jacob |  |
+| Sat 5–8 PM (Angie and Ananya from 6:30) | s15 | Video script + slide visuals | Ananya |  |
 | Sat 8 PM | c4 | Draft slides and script reviewed | Everyone |  |
 | Sun 8–9 AM | u1 | Check every slide number against the code | Angie |  |
 | Sun 8–9 AM | u2 | Final slide pass | Jacob |  |
@@ -594,6 +601,8 @@ capture = test.join(top.select('uwi'), 'uwi').agg(F.sum('cost_score')) / test.ag
 
 **Done when:** Team agrees on the score definition and the 2 actions.
 
+> **Evidence:** Decision record with evidence and a sign-off table: `docs/c2_signoff.md`. Recommended: work list leads with recency (2+ failures in 90 days), then 12-month cost; score = cost + recent repairs (16.5% vs size 15.9%, no clear win; per-day score is worse at 14.1%, so no switch); actions = rod upgrade/corrosion inhibition (100 wells, payback 1.8–3.5 yrs) and pump/tubing prevention (26 wells, 2.0–4.1 yrs); watchlist leads early warning, runtime rule optional.
+
 ### Sat 1–3 PM
 
 #### `n4` Budget scenarios (precomputed) · Jacob
@@ -647,13 +656,15 @@ capture = test.join(top.select('uwi'), 'uwi').agg(F.sum('cost_score')) / test.ag
 
 **Go/no-go on weather: only if all three dashboard pages work.**
 
-#### `c3` Weather decision made · Everyone
+#### `c3` Weather decision made: no-go · Everyone
 
 1. Free seasonality check first: monthly Power/grid downtime hours and monthly median torque on instrumented wells. Already done on the event logs: failures are flat month to month and Apr–May Rod Truck jobs run 8% below expected, so no weather story there.
 2. If none of the three is seasonal, skip weather and say so on one slide.
 3. If seasonal and f3 found a source, go to s12.
 
 **Done when:** Decision posted in chat.
+
+> **Evidence:** Decided Sat 4 PM: no weather. 01d found no repeatable seasonal peak in power/grid downtime (spikes only, December lowest) and failures are flat month to month. Say so on one slide: failures are chronic, not weather-driven.
 
 ### Sat 3–5 PM
 
@@ -699,7 +710,7 @@ capture = test.join(top.select('uwi'), 'uwi').agg(F.sum('cost_score')) / test.ag
 
 **Done when:** Each limitation states its effect on the result (over- or under-estimate).
 
-#### `s12` Weather join + 3 checks (2 h cap), or threshold polish · Ananya
+#### `s12` Weather join: dropped at c3 · Ananya
 
 1. Pull daily min/max temperature for each of the 26 area centroids (mean lat/lon of wells), 2021–2026.
 2. H1: Power/grid downtime hours per well-day on days with min temp ≤ −30 °C vs other winter days.
@@ -711,7 +722,64 @@ capture = test.join(top.select('uwi'), 'uwi').agg(F.sum('cost_score')) / test.ag
 
 **Done when:** One slide's worth of evidence, or a documented null.
 
-### Sat 5–8 PM
+> **Watch out:** Dropped Sat 4 PM. Kept here so the task ID and ticks stay stable; tick it as closed.
+
+### Sat 4–6:30 PM · stretch for Angie and Ananya
+
+#### `n6` Model feature table: one row per producing well per week · Angie · `notebooks/04b_risk_model.py` (new)
+
+**Inputs:** `silver_daily`, `silver_downtime`, `feat_daily_sensor`, `silver_jobs`, `gold_failure_gap`, `gold_failure_downtime`, `gold_well_month`
+
+1. Snapshots every Monday from 2025-09-01 to 2026-09-28 (each needs 90 days of failure-log history before it and 30 days of follow-up after it).
+2. Universe: wells with `well_daily_status = 'Producing'` on the snapshot day.
+3. Features, using only data before the snapshot: failures in the last 30 / 90 / 180 days and days since the last failure (log from Jun 2025); Rod Truck and Workover jobs and $ in the last 90 / 365 days (all years); partial-run and down days in the last 7 and 30 days (down days exclude economic, planned, injection); efficiency change and 7-day mean; 30-day oil and fluid rate and water cut; downhole lost oil in the last 90 days; median RPM; pump make; area.
+4. Label: the well stops for a rod, pump or tubing failure 2–30 days after the snapshot (`gold_failure_downtime.stop_date`), the same definition as s9.
+5. Build it in Spark SQL with window functions, like 04a section 8; write `gold_model_features`. Notebook: `04b_risk_model.py`.
+
+**Output:** `gold_model_features` (about 1,400 wells × 57 weeks).
+
+**Done when:** An assert shows no feature reads a date on or after its snapshot, and the label rate per week is printed (expect roughly 5–10%).
+
+> **Watch out:** Leakage is the main risk: every window must end the day before the snapshot.
+
+#### `n7` Train and test a failure-risk model (stretch, stop at 6:30 PM) · Ananya · `notebooks/04b_risk_model.py` (new)
+
+**Inputs:** `gold_model_features` from n6
+
+1. Time split: train on snapshots up to 2025-12-29 (labels end by 2026-01-28), test on snapshots from 2026-02-02. No random split.
+2. Models: logistic regression (scaled, class-weighted) and scikit-learn HistGradientBoostingClassifier (handles missing sensor values). Both ship with Databricks serverless; no new package.
+3. Baselines on the same test weeks: recency watchlist (2+ failures in 90 days), the s6 runtime rule, random.
+4. Metrics: precision and failures caught in the top 50 wells per week (a crew-sized list), recall at the watchlist's alert volume, ROC AUC, PR AUC, and calibration by decile.
+5. Permutation importance on the test weeks for the top 10 features, in plain words for the slide.
+6. Write `gold_model_eval` and `gold_risk_scores` (latest snapshot score per well) for the work list. Optionally log the run to MLflow.
+
+**Output:** Model vs baselines table, top features, `gold_risk_scores`.
+
+**Done when:** Test metrics reported as measured. If the model does not beat the watchlist on top-50 precision, say so on the slide and keep the watchlist.
+
+> **Evidence:** Bar to beat on 2026 (s9, alert-based): watchlist precision 28.8%, recall 34.9%; runtime rule 17.0% / 43.6%. n2: 2+ recent failures → 61–70% fail again within 90 days.
+
+> **Watch out:** Stop at 6:30 PM whatever the result; the README and script come first after that.
+
+#### `n8` Dashboard improvements · Angie
+
+**Inputs:** Dashboard `Strathcona Reliability Desk`; `dashboard/build_reliability_desk.py`
+
+1. First look at every page in Databricks and fix anything broken or hard to read (labels cut off, wrong sort, empty widgets).
+2. Add a one-page summary as page 1: four numbers (about C$33M a year repair spend, 57% repeat within 90 days, 114 watchlist wells, payback 1.8–3.5 years) and the three recommendations from c2. This is the page for the video and judges.
+3. Add trends: monthly repair spend since 2023 and monthly failures since Jun 2025, so a reader sees whether it is getting worse.
+4. Add a failure-type filter next to the area filter.
+5. Work list: add the n7 risk score and risk tier when `gold_risk_scores` exists; keep the recency tier as the lead sort unless the model wins.
+6. Use one color per failure type and per tier across pages.
+7. Try a map of watchlist wells; drop it if the widget errors.
+8. Add budget scenarios to the payback page when n4 lands.
+9. Every query is tested on the warehouse by the build script before updating; save a screenshot of each page to `dashboard/`.
+
+**Output:** Updated, republished dashboard and screenshots.
+
+**Done when:** A judge understands the recommendation from the summary page alone, and every page renders without errors.
+
+### Sat 5–8 PM (Angie and Ananya from 6:30)
 
 #### `s13` README findings and methods · Angie
 
@@ -869,7 +937,7 @@ capture = test.join(top.select('uwi'), 'uwi').agg(F.sum('cost_score')) / test.ag
 | Payback / break-even for 2 actions + sensitivity | ● | ● | ●● | ●● |  |
 | Early-warning thresholds vs the recency baseline (tune Jun–Dec 2025, test 2026) | ● | ● | ● | ● | ● |
 | AI/BI dashboard (+ Genie) |  | ● | ● | ●● | ●● |
-| Weather link (if done) | ●● |  | ● |  | ●● |
+| Failure-risk model vs the watchlist (stretch) | ● | ●● | ● | ● | ●● |
 | Limitations list | ● | ●● | ● |  |  |
 | Strategy case + 30/60/90 implementation plan | ● |  | ●● | ●● | ● |
 | README, video, slides |  |  |  | ●● |  |
