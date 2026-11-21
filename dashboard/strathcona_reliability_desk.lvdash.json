@@ -163,6 +163,31 @@
    ]
   },
   {
+   "name": "ds_p3_alerts",
+   "displayName": "Current runtime alerts (last 14 days of data)",
+   "queryLines": [
+    "WITH a AS (SELECT * FROM workspace.dsmlc.gold_alerts WHERE is_current),\n",
+    "nm AS (SELECT uwi, MAX(well_name) AS well_name FROM workspace.dsmlc.silver_daily WHERE production_date >= DATE'2026-10-01' GROUP BY uwi),\n",
+    "t AS (SELECT uwi, failures_prior_90 FROM workspace.dsmlc.gold_recency_tier WHERE is_current)\n",
+    "SELECT a.alert_date, a.uwi, COALESCE(nm.well_name, a.uwi) AS well_name, a.field_operating_area,\n",
+    "       CAST(a.partial_7d AS INT) AS partial_days_last_7,\n",
+    "       COALESCE(t.failures_prior_90, 0) AS failures_last_90d,\n",
+    "       CASE WHEN COALESCE(t.failures_prior_90, 0) >= 2 THEN 'Yes' ELSE 'No' END AS on_watchlist\n",
+    "FROM a LEFT JOIN nm USING (uwi) LEFT JOIN t USING (uwi)\n"
+   ]
+  },
+  {
+   "name": "ds_p5_rules",
+   "displayName": "Runtime rule vs recency watchlist, 2026 holdout",
+   "queryLines": [
+    "SELECT rule_name,\n",
+    "       ROUND(100 * precision, 1) AS precision_pct,\n",
+    "       ROUND(100 * recall, 1) AS recall_pct,\n",
+    "       alerts, alerts_per_area_week, median_lead_days, failures_caught, label_failures\n",
+    "FROM workspace.dsmlc.gold_warning_eval WHERE window = '2026 holdout'\n"
+   ]
+  },
+  {
    "name": "ds_p4_cost",
    "displayName": "Cost per failure by type",
    "queryLines": [
@@ -1501,6 +1526,88 @@
     },
     {
      "widget": {
+      "name": "p3-alerts",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_p3_alerts",
+         "fields": [
+          {
+           "name": "alert_date",
+           "expression": "`alert_date`"
+          },
+          {
+           "name": "well_name",
+           "expression": "`well_name`"
+          },
+          {
+           "name": "field_operating_area",
+           "expression": "`field_operating_area`"
+          },
+          {
+           "name": "partial_days_last_7",
+           "expression": "`partial_days_last_7`"
+          },
+          {
+           "name": "failures_last_90d",
+           "expression": "`failures_last_90d`"
+          },
+          {
+           "name": "on_watchlist",
+           "expression": "`on_watchlist`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "alert_date",
+          "displayName": "Alert date"
+         },
+         {
+          "fieldName": "well_name",
+          "displayName": "Well"
+         },
+         {
+          "fieldName": "field_operating_area",
+          "displayName": "Area"
+         },
+         {
+          "fieldName": "partial_days_last_7",
+          "displayName": "Partial-run days, last 7"
+         },
+         {
+          "fieldName": "failures_last_90d",
+          "displayName": "Failures, last 90 days"
+         },
+         {
+          "fieldName": "on_watchlist",
+          "displayName": "Also on watchlist"
+         }
+        ]
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Runtime alerts in the last 14 days (2+ partial-run days in a week; 17% are followed by a failure within 2-30 days)"
+       }
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 21,
+      "width": 6,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
       "name": "p3-next",
       "multilineTextboxSpec": {
        "lines": [
@@ -1510,7 +1617,7 @@
      },
      "position": {
       "x": 0,
-      "y": 21,
+      "y": 27,
       "width": 6,
       "height": 1
      }
@@ -2406,16 +2513,183 @@
     },
     {
      "widget": {
-      "name": "p5-pending",
-      "multilineTextboxSpec": {
-       "lines": [
-        "**Sensor rules vs the watchlist: pending** (tasks s6, s9 in `04a_early_warning`). Precision = share of flagged wells that fail again within 90 days; recall = share of later failures that were flagged."
-       ]
+      "name": "p5-rules",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_p5_rules",
+         "fields": [
+          {
+           "name": "rule_name",
+           "expression": "`rule_name`"
+          },
+          {
+           "name": "precision_pct",
+           "expression": "`precision_pct`"
+          },
+          {
+           "name": "recall_pct",
+           "expression": "`recall_pct`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 3,
+       "widgetType": "bar",
+       "encodings": {
+        "x": {
+         "fieldName": "rule_name",
+         "scale": {
+          "type": "categorical"
+         },
+         "displayName": "Rule"
+        },
+        "y": {
+         "scale": {
+          "type": "quantitative"
+         },
+         "fields": [
+          {
+           "fieldName": "precision_pct",
+           "displayName": "Precision (%)"
+          },
+          {
+           "fieldName": "recall_pct",
+           "displayName": "Recall (%)"
+          }
+         ]
+        }
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "The runtime rule does not beat the watchlist on precision, but adds recall (2026)"
+       },
+       "mark": {
+        "layout": "group"
+       }
       }
      },
      "position": {
       "x": 0,
       "y": 11,
+      "width": 3,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "p5-rules-table",
+      "queries": [
+       {
+        "name": "main_query",
+        "query": {
+         "datasetName": "ds_p5_rules",
+         "fields": [
+          {
+           "name": "rule_name",
+           "expression": "`rule_name`"
+          },
+          {
+           "name": "alerts",
+           "expression": "`alerts`"
+          },
+          {
+           "name": "precision_pct",
+           "expression": "`precision_pct`"
+          },
+          {
+           "name": "recall_pct",
+           "expression": "`recall_pct`"
+          },
+          {
+           "name": "failures_caught",
+           "expression": "`failures_caught`"
+          },
+          {
+           "name": "label_failures",
+           "expression": "`label_failures`"
+          },
+          {
+           "name": "alerts_per_area_week",
+           "expression": "`alerts_per_area_week`"
+          },
+          {
+           "name": "median_lead_days",
+           "expression": "`median_lead_days`"
+          }
+         ],
+         "disaggregated": true
+        }
+       }
+      ],
+      "spec": {
+       "version": 2,
+       "widgetType": "table",
+       "encodings": {
+        "columns": [
+         {
+          "fieldName": "rule_name",
+          "displayName": "Rule"
+         },
+         {
+          "fieldName": "alerts",
+          "displayName": "Alerts"
+         },
+         {
+          "fieldName": "precision_pct",
+          "displayName": "Precision (%)"
+         },
+         {
+          "fieldName": "recall_pct",
+          "displayName": "Recall (%)"
+         },
+         {
+          "fieldName": "failures_caught",
+          "displayName": "Failures caught"
+         },
+         {
+          "fieldName": "label_failures",
+          "displayName": "Failures"
+         },
+         {
+          "fieldName": "alerts_per_area_week",
+          "displayName": "Alerts per area-week"
+         },
+         {
+          "fieldName": "median_lead_days",
+          "displayName": "Median warning (days)"
+         }
+        ]
+       },
+       "frame": {
+        "showTitle": true,
+        "title": "Early-warning test on Jan–Oct 2026 (rule frozen on 2025)"
+       }
+      }
+     },
+     "position": {
+      "x": 3,
+      "y": 11,
+      "width": 3,
+      "height": 6
+     }
+    },
+    {
+     "widget": {
+      "name": "p5-rules-note",
+      "multilineTextboxSpec": {
+       "lines": [
+        "**How to read the early-warning test.** Rule frozen on Jun–Dec 2025: alert when a producing well has 2+ partial-run days in a week (down-day and efficiency rules did not add precision). An alert is a hit if the well stops for a rod, pump or tubing failure 2–30 days later; one alert per well per 14 days. Recommendation: lead with the recency watchlist; add the runtime rule if crews can handle about 9 alerts per area per week, which lifts failures caught from 500 to 813 of 1,432."
+       ]
+      }
+     },
+     "position": {
+      "x": 0,
+      "y": 17,
       "width": 6,
       "height": 2
      }
@@ -2431,7 +2705,7 @@
      },
      "position": {
       "x": 0,
-      "y": 13,
+      "y": 19,
       "width": 6,
       "height": 1
      }
@@ -2742,6 +3016,19 @@
          ],
          "disaggregated": false
         }
+       },
+       {
+        "name": "q_ds_p3_alerts_area",
+        "query": {
+         "datasetName": "ds_p3_alerts",
+         "fields": [
+          {
+           "name": "field_operating_area",
+           "expression": "`field_operating_area`"
+          }
+         ],
+         "disaggregated": false
+        }
        }
       ],
       "spec": {
@@ -2773,6 +3060,11 @@
           "fieldName": "field_operating_area",
           "displayName": "Operating area",
           "queryName": "q_ds_p3_list_area"
+         },
+         {
+          "fieldName": "field_operating_area",
+          "displayName": "Operating area",
+          "queryName": "q_ds_p3_alerts_area"
          }
         ]
        },

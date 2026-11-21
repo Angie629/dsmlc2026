@@ -270,12 +270,12 @@ Owners: A = Angie, J = Jacob, N = Ananya. ◆ marks a checkpoint.
 | Sat 9–11 AM | s3 | Look at sensors before 50 failures | Ananya | `notebooks/04a_early_warning.py` |
 | Sat 11 AM–1 PM | s4 | Out-of-time validation of the ranking | Angie | `notebooks/02a_ranking.py` |
 | Sat 11 AM–1 PM | s5 | Pick 2 actions and compute break-even payback | Jacob | `notebooks/03b_runlife_payback.py` |
-| Sat 11 AM–1 PM | s6 | Draft threshold rules, tune on Jun–Dec 2025 | Ananya | `notebooks/04a_early_warning.py` (section to add) |
+| Sat 11 AM–1 PM | s6 | Draft threshold rules, tune on Jun–Dec 2025 | Ananya | `notebooks/04a_early_warning.py` |
 | Sat 1 PM | c2 | Ranking and actions signed off | Everyone |  |
 | Sat 1–3 PM | n4 | Budget scenarios (precomputed) | Jacob |  |
 | Sat 1–3 PM | s7 | Dashboard page 2: weekly work list and repeat failures | Angie |  |
 | Sat 1–3 PM | s8 | Dashboard page 3: payback and budget scenarios | Jacob |  |
-| Sat 1–3 PM | s9 | Test thresholds on 2026 + dashboard page 4: watchlist | Ananya | `notebooks/04a_early_warning.py` (section to add) |
+| Sat 1–3 PM | s9 | Test thresholds on 2026 + dashboard page 4: watchlist | Ananya | `notebooks/04a_early_warning.py` |
 | Sat 3 PM | c3 | Weather decision made | Everyone |  |
 | Sat 3–5 PM | n3 | Strategy case and implementation plan (30/60/90) | Ananya |  |
 | Sat 3–5 PM | n5 | Dashboard page 1: where barrels and dollars go | Angie |  |
@@ -565,7 +565,7 @@ capture = test.join(top.select('uwi'), 'uwi').agg(F.sum('cost_score')) / test.ag
 
 > **Watch out:** Action effects come from observational comparisons. Say 'associated with', not 'causes'.
 
-#### `s6` Draft threshold rules, tune on Jun–Dec 2025 · Ananya · `notebooks/04a_early_warning.py` (section to add)
+#### `s6` Draft threshold rules, tune on Jun–Dec 2025 · Ananya · `notebooks/04a_early_warning.py`
 
 **Inputs:** `silver_daily` (runtime), `feat_daily_sensor` (efficiency, fluid rate), Jun–Dec 2025 failures aligned to the stop day
 
@@ -580,7 +580,7 @@ capture = test.join(top.select('uwi'), 'uwi').agg(F.sum('cost_score')) / test.ag
 
 **Done when:** Thresholds written down and committed before s9 runs.
 
-> **Evidence:** About 1,200 failures in Jun–Dec 2025 for tuning, about 1,640 in Jan–Oct 2026 for testing.
+> **Evidence:** Done Nov 21 (`04a_early_warning` section 8, branch `feature-dashboard`, ran in Databricks). Frozen on Jun–Dec 2025: alert when a producing well has 2+ partial-run days in a week (down-day and efficiency rules added no precision). 2025: precision 18.2%, recall 40.2% vs watchlist 31.5% / 29.3%.
 
 ### ◆ Sat 1 PM
 
@@ -631,7 +631,7 @@ capture = test.join(top.select('uwi'), 'uwi').agg(F.sum('cost_score')) / test.ag
 
 **Done when:** Every number on the page traces to the s5 notebook.
 
-#### `s9` Test thresholds on 2026 + dashboard page 4: watchlist · Ananya · `notebooks/04a_early_warning.py` (section to add)
+#### `s9` Test thresholds on 2026 + dashboard page 4: watchlist · Ananya · `notebooks/04a_early_warning.py`
 
 1. Run the frozen rules on 2026 data. Report precision, recall, median lead time (days from first alert to failure), alerts per area per week.
 2. Compare with a random-alert baseline at the same alert rate.
@@ -641,7 +641,7 @@ capture = test.join(top.select('uwi'), 'uwi').agg(F.sum('cost_score')) / test.ag
 
 **Done when:** Metrics reported as measured, whether good or weak.
 
-> **Evidence:** If precision is near the random baseline, switch to the monitoring-view fallback (risk 1).
+> **Evidence:** Done Nov 21 (tables `gold_warning_eval`, `gold_alerts`; dashboard pages 3 and 5). 2026 holdout: runtime rule precision 17.0%, recall 43.6% (625 of 1,432 failures, median 18 days warning); recency watchlist 28.8% / 34.9% (500); rule or watchlist 21.6% / 56.8% (813), about 9 alerts per area-week. The rule does not beat the watchlist on precision, so the watchlist leads (risk 1 fallback) and the rule is an optional add-on for recall. 86 current alerts.
 
 ### ◆ Sat 3 PM
 

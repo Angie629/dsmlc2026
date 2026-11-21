@@ -148,14 +148,13 @@ flowchart LR
   GFR[("#nbsp;#nbsp;gold_failure_rates#nbsp;#nbsp;")]:::gold
   GPB[("#nbsp;#nbsp;gold_payback · s5#nbsp;#nbsp;")]:::gold
   GBS[("#nbsp;#nbsp;gold_budget_scenarios · n4#nbsp;#nbsp;")]:::planned
-  GAL[("#nbsp;#nbsp;gold_alerts · s6, s9#nbsp;#nbsp;")]:::planned
+  GAL[("#nbsp;#nbsp;gold_alerts · s6, s9#nbsp;#nbsp;")]:::gold
 
   SIL --> N2 --> GWM & GWP & GRV
   SIL --> N3a --> GFG & GRT
   SIL --> N3b --> GFR
   N3b --> GPB -.-> GBS
-  SIL --> N4 -.-> GAL
-  GRT -.-> N4
+  SIL --> N4 --> GAL
 ```
 
 ### Into the dashboard
@@ -177,7 +176,7 @@ flowchart LR
   GFD[("#nbsp;#nbsp;gold_failure_downtime#nbsp;#nbsp;")]:::gold
   GPB[("#nbsp;#nbsp;gold_payback#nbsp;#nbsp;")]:::gold
   GBS[("#nbsp;#nbsp;gold_budget_scenarios#nbsp;#nbsp;")]:::planned
-  GAL[("#nbsp;#nbsp;gold_alerts#nbsp;#nbsp;")]:::planned
+  GAL[("#nbsp;#nbsp;gold_alerts#nbsp;#nbsp;")]:::gold
 
   P1{{"#nbsp;Page 1 · n5#nbsp;<br>Where barrels and dollars go"}}:::dash
   P2{{"#nbsp;Page 2 · s7#nbsp;<br>Weekly work list"}}:::dash
@@ -189,7 +188,7 @@ flowchart LR
   GFD & GPB --> P3
   GBS -.-> P3
   GRT --> P4
-  GAL -.-> P4
+  GAL --> P4
 ```
 
 ### Run order
@@ -257,11 +256,12 @@ Row counts are from Databricks on Nov 21.
 | `gold_failure_rates` | dimension × scope × area × group | 186 | 03b (s2) | 03b (s5), slides | Failures per well-year by pump make, model, RPM band within area, with intervals and `vs_area` |
 | `gold_payback` | action × netback × action cost × avoided share | 36 | 03b (s5) | Dashboard page 4, n4 | Bad-actor wells (picked Jun–Dec 2025, rate measured Jan–Oct 2026), mean cost per failure, failures to recover cost, yearly savings, payback years |
 | `gold_budget_scenarios` | scenario × well | planned | n4 (notebook TBD, e.g. `03c_budget_scenarios`) | Dashboard page 3 | Which wells to treat for 25/50/100/200-well budgets |
-| `gold_alerts` | well × day alert | planned | 04a (s6, s9) | Dashboard page 4 | Threshold-rule alerts and their 2026 test metrics |
+| `gold_warning_eval` | window × rule | 6 | 04a (s6, s9) | Dashboard page 5 | Precision, recall, alerts per area-week and warning days for the frozen runtime rule, the recency watchlist and both combined, on 2025 tuning and 2026 holdout |
+| `gold_alerts` | well × alert day | 5,913 | 04a (s6, s9) | Dashboard page 3 | Runtime-rule alerts with area, rule inputs and `is_current` (86 in the last 14 days) |
 
 ## Dashboard pages and their tables
 
-The live dashboard is **Strathcona Reliability Desk** (6 pages + an area filter), built from Ananya's design spec on the `feature-dashboard` branch. Its definition is `dashboard/strathcona_reliability_desk.lvdash.json`, generated and query-tested by `dashboard/build_reliability_desk.py` (`python dashboard/build_reliability_desk.py test`, then `build`). Budget scenarios (page 4) and sensor-rule results (page 5) show a pending note until `gold_budget_scenarios` and `gold_alerts` exist. The table below is the build plan's four-page grouping.
+The live dashboard is **Strathcona Reliability Desk** (6 pages + an area filter), built from Ananya's design spec on the `feature-dashboard` branch. Its definition is `dashboard/strathcona_reliability_desk.lvdash.json`, generated and query-tested by `dashboard/build_reliability_desk.py` (`python dashboard/build_reliability_desk.py test`, then `build`). Budget scenarios (page 4) show a pending note until `gold_budget_scenarios` exists. The table below is the build plan's four-page grouping.
 
 | Page | Task | Owner | Tables |
 |---|---|---|---|
