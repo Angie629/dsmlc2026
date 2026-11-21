@@ -1,6 +1,6 @@
-# Connecting to Databricks from your laptop
+# Databricks API and token setup
 
-How each teammate connects the Databricks CLI (and optionally the Python SDK) to our workspace. Notebooks running inside Databricks don't need any of this; they can query the tables directly.
+How each teammate connects the Databricks CLI (and optionally the Python SDK) to our workspace. Notebooks running inside Databricks don't need any of this; they can query the tables directly. For syncing this repo into Databricks, see [databricks_github_practice.md](databricks_github_practice.md).
 
 ## Rules
 
