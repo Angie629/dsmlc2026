@@ -134,7 +134,3 @@ cost_score = repair_$ + downhole_lost_oil_m3 × 6.2898 × netback_per_bbl
 - Video (5 min): *pending*
 - Slides: *pending*
 - Dashboard screenshots: `dashboard/`
-
-## AI disclosure
-
-We used Claude (Anthropic) through Claude Code for competition prep, data profiling scripts, idea scoring, planning pages, and drafting documentation. Every number in this repo was produced by code we ran and checked. Details of each use, what we kept, and how we verified it are in [AI_LOG.md](AI_LOG.md).
