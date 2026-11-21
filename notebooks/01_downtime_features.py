@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 01 · Downtime buckets and daily sensor features
+# MAGIC # 01 · Downtime buckets and daily sensor features · task f6
 # MAGIC
 # MAGIC Build plan task f6. Reads `silver_daily` (run `01_clean_daily` first) and writes:
 # MAGIC - `workspace.dsmlc.downtime_bucket_map`: every `(downtime_code_1, downtime_code_2)` pair → bucket, with rows, hours and lost oil

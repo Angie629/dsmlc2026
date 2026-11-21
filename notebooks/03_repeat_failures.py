@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 03 · Repeat failures and recency tiers
+# MAGIC # 03 · Repeat failures and recency tiers · task n2
 # MAGIC
 # MAGIC Build plan task n2. Needs `01_clean_jobs_failures`. Writes:
 # MAGIC - `workspace.dsmlc.gold_failure_gap`: one row per failure with days to the next failure on the same well

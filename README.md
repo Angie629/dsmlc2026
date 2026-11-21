@@ -117,7 +117,7 @@ Team docs:
 cost_score = repair_$ + downhole_lost_oil_m3 × 6.2898 × netback_per_bbl
 ```
 
-`repair_$` is the sum of `field_est_total` for Rod Truck and Workover jobs. `netback_per_bbl` is Strathcona's reported heavy oil operating netback (source cited under External resources).
+`repair_$` is the sum of `field_est_total` for Rod Truck and Workover jobs. `netback_per_bbl` is C$32.50 per boe, Strathcona's Q3 2026 operating earnings (company-wide, not heavy oil only; see External resources).
 
 **Equipment comparison.** Failures per producing well-year by pump make and model, compared within operating areas, with Poisson 95% intervals and a minimum group size.
 
@@ -138,9 +138,12 @@ cost_score = repair_$ + downhole_lost_oil_m3 × 6.2898 × netback_per_bbl
 ## External resources
 
 - Organizer materials: Briefing Document, Research Topic Guide, Dataset Handbook
-- Strathcona Resources investor reports (netback source; quarter and page to be cited)
+- Strathcona Resources, Q3 2026 results (release dated Nov 8, 2026), as reported by Cantech Letter: operating earnings C$32.50 per boe (value of a lost barrel), WCS price, operating and transport costs, Lloydminster Conventional scale. Link and MD&A page to be added.
+- Western Energy Services, Q3 2026 results, as reported by BOE Report: C$921 per service hour, used only to cross-check job cost estimates. Link to be added.
+- Weatherford COROD case study, Colombia (six wells): rod run life up 51%, used only to bracket the avoided-failure assumption. Link to be added.
+- Weatherford COROD corrosion-inhibition case study, Alberta (one well): qualitative support only. Link to be added.
 - PetroWiki: progressing cavity pump systems
-- Weather source, if used
+- Weather: not used. Power/grid downtime showed no repeatable seasonal pattern (`01_daily_checks`).
 
 ## Links
 

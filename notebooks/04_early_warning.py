@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 04 · Early warning, part 1: what sensors show before failures
+# MAGIC # 04 · Early warning, part 1: what sensors show before failures · task s3 (s6, s9 next)
 # MAGIC
 # MAGIC Build plan task s3. Needs `01_clean_daily` and `01_clean_jobs_failures`. Read-only: writes no tables.
 # MAGIC

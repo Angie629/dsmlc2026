@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 03 · Failure rates by equipment, within area
+# MAGIC # 03 · Failure rates by equipment, within area · task s2 (s5 next)
 # MAGIC
 # MAGIC Build plan task s2. Needs `01_clean_daily` and `01_clean_jobs_failures`. Writes `workspace.dsmlc.gold_failure_rates`.
 # MAGIC Payback (task s5) is added to this notebook next.

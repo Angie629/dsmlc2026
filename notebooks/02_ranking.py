@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 02 · Monthly well table and cost score v1
+# MAGIC # 02 · Monthly well table and cost score v1 · task s1 (s4 next)
 # MAGIC
 # MAGIC Build plan task s1. Needs all `01_*` notebooks. Writes:
 # MAGIC - `workspace.dsmlc.gold_well_month`: one row per `uwi` × month
@@ -12,12 +12,12 @@
 # MAGIC ```
 # MAGIC cost_score = repair_cost + downhole_lost_oil_m3 × 6.2898 × netback_cad_per_bbl
 # MAGIC ```
-# MAGIC `netback_cad_per_bbl` comes from the widget at the top. It must be Strathcona's reported heavy oil operating netback (investor reports); fill in the source too. Until it is set, `cost_score` stays null and only the two parts are ranked.
+# MAGIC `netback_cad_per_bbl` comes from the widget at the top, prefilled with C$32.50 per boe: Strathcona's Q3 2026 operating earnings (release dated Nov 8, 2026). It is company-wide, not heavy oil only; confirm the definition in the MD&A before quoting it. At this value lost oil is worth about C$9M a year against about C$46M a year of repair spend, so report the two parts separately. Clear the widget to rank on the parts only.
 
 # COMMAND ----------
 
-dbutils.widgets.text("netback_cad_per_bbl", "", "Netback (CAD/bbl)")
-dbutils.widgets.text("netback_source", "", "Netback source (report, quarter, page)")
+dbutils.widgets.text("netback_cad_per_bbl", "32.50", "Netback (CAD/bbl)")
+dbutils.widgets.text("netback_source", "Strathcona Q3 2026 results (Nov 8, 2026): operating earnings C$32.50/boe, company-wide; confirm definition in MD&A", "Netback source (report, quarter, page)")
 
 # COMMAND ----------
 
