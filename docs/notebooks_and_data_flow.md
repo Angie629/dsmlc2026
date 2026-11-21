@@ -51,7 +51,11 @@ Always use the full name (`workspace.dsmlc.silver_daily`) in code.
 
 ## Data flow
 
-Solid lines exist today. Dashed lines and grey boxes are planned in the build plan.
+Read the overview first, then the detail for the stage you work on. Cylinders are Databricks tables, double-edged boxes are notebooks. Dashed shapes and lines are planned in the build plan; everything else exists in Databricks today.
+
+The three bronze tables are **not made by any notebook in this repo**. Jacob loaded them in task f1: the Parquet files sit in the volume `workspace.dsmlc.dataset`, and the `_rescued_data` column shows they were read with Databricks' file loader. To make the repo fully reproducible, that load could be saved as `00a_load_bronze.py`.
+
+### Overview
 
 ```mermaid
 flowchart LR
@@ -59,64 +63,133 @@ flowchart LR
   classDef silver fill:#e4e9ec,stroke:#5a6a74,color:#17232b
   classDef gold fill:#f6e7a8,stroke:#9a7a0a,color:#17232b
   classDef nb fill:#dbe8f5,stroke:#2c5d8a,color:#17232b
+  classDef load fill:#ffffff,stroke:#a8590a,color:#17232b
+  classDef dash fill:#dcefe3,stroke:#2f7a4f,color:#17232b
+
+  F[/"#nbsp;Parquet files in volume#nbsp;<br>#nbsp;f1 · loaded by Jacob#nbsp;"/]:::load
+  B[("#nbsp;#nbsp;Bronze#nbsp;#nbsp;<br>3 tables")]:::bronze
+  S01[["#nbsp;Stage 01#nbsp;<br>01a · 01b · 01c · 01d"]]:::nb
+  SV[("#nbsp;#nbsp;Silver#nbsp;#nbsp;<br>7 tables")]:::silver
+  S02[["#nbsp;Stage 02#nbsp;<br>02a"]]:::nb
+  S03[["#nbsp;Stage 03#nbsp;<br>03a · 03b"]]:::nb
+  S04[["#nbsp;Stage 04#nbsp;<br>04a"]]:::nb
+  G[("#nbsp;#nbsp;Gold#nbsp;#nbsp;<br>7 tables + 3 planned")]:::gold
+  D{{"#nbsp;AI/BI dashboard#nbsp;<br>4 pages"}}:::dash
+
+  F --> B --> S01 --> SV
+  S01 --> G
+  SV --> S02 --> G
+  SV --> S03 --> G
+  SV --> S04 -.-> G
+  G --> D
+```
+
+### Stage 01 · clean and prepare
+
+```mermaid
+flowchart LR
+  classDef bronze fill:#f3e3cf,stroke:#a8590a,color:#17232b
+  classDef silver fill:#e4e9ec,stroke:#5a6a74,color:#17232b
+  classDef gold fill:#f6e7a8,stroke:#9a7a0a,color:#17232b
+  classDef nb fill:#dbe8f5,stroke:#2c5d8a,color:#17232b
+  classDef load fill:#ffffff,stroke:#a8590a,color:#17232b
+
+  F[/"#nbsp;Parquet files in volume#nbsp;<br>#nbsp;f1 · loaded by Jacob#nbsp;"/]:::load
+
+  subgraph BRONZE["Bronze (raw, read-only)"]
+    DP[("#nbsp;#nbsp;daily_production#nbsp;#nbsp;")]:::bronze
+    WJ[("#nbsp;#nbsp;well_jobs#nbsp;#nbsp;")]:::bronze
+    PF[("#nbsp;#nbsp;production_failures#nbsp;#nbsp;")]:::bronze
+  end
+
+  A[["#nbsp;01a_clean_daily · f4#nbsp;"]]:::nb
+  BB[["#nbsp;01b_clean_jobs_failures · f5#nbsp;"]]:::nb
+  C[["#nbsp;01c_downtime_features · f6#nbsp;"]]:::nb
+  DD[["#nbsp;01d_daily_checks · n1#nbsp;"]]:::nb
+
+  SD[("#nbsp;#nbsp;silver_daily#nbsp;#nbsp;")]:::silver
+  SJ[("#nbsp;#nbsp;silver_jobs#nbsp;#nbsp;")]:::silver
+  SF[("#nbsp;#nbsp;silver_failures#nbsp;#nbsp;")]:::silver
+  ST[("#nbsp;#nbsp;silver_downtime#nbsp;#nbsp;")]:::silver
+  BM[("#nbsp;#nbsp;downtime_bucket_map#nbsp;#nbsp;")]:::silver
+  FS[("#nbsp;#nbsp;feat_daily_sensor#nbsp;#nbsp;")]:::silver
+  GFD[("#nbsp;#nbsp;gold_failure_downtime#nbsp;#nbsp;")]:::gold
+
+  F --> DP & WJ & PF
+  DP --> A --> SD
+  WJ & PF --> BB --> SJ & SF
+  SD --> C --> ST & BM & FS
+  SD & ST & SF --> DD --> GFD
+```
+
+`01a`, `01b` and `01c` also append one row per cleaning rule to `cleaning_log`.
+
+### Stages 02–04 · analysis
+
+```mermaid
+flowchart LR
+  classDef silver fill:#e4e9ec,stroke:#5a6a74,color:#17232b
+  classDef gold fill:#f6e7a8,stroke:#9a7a0a,color:#17232b
+  classDef nb fill:#dbe8f5,stroke:#2c5d8a,color:#17232b
+  classDef planned fill:#ffffff,stroke:#93a3ad,color:#5a6a74,stroke-dasharray: 4 3
+
+  SIL[("#nbsp;#nbsp;silver tables#nbsp;#nbsp;<br>+ gold_failure_downtime")]:::silver
+
+  N2[["#nbsp;02a_ranking · s1, s4#nbsp;"]]:::nb
+  N3a[["#nbsp;03a_repeat_failures · n2#nbsp;"]]:::nb
+  N3b[["#nbsp;03b_runlife_payback · s2, s5#nbsp;"]]:::nb
+  N4[["#nbsp;04a_early_warning · s3, s6, s9#nbsp;"]]:::nb
+
+  GWM[("#nbsp;#nbsp;gold_well_month#nbsp;#nbsp;")]:::gold
+  GWP[("#nbsp;#nbsp;gold_well_period#nbsp;#nbsp;")]:::gold
+  GRV[("#nbsp;#nbsp;gold_ranking_validation#nbsp;#nbsp;")]:::gold
+  GFG[("#nbsp;#nbsp;gold_failure_gap#nbsp;#nbsp;")]:::gold
+  GRT[("#nbsp;#nbsp;gold_recency_tier#nbsp;#nbsp;")]:::gold
+  GFR[("#nbsp;#nbsp;gold_failure_rates#nbsp;#nbsp;")]:::gold
+  GPB[("#nbsp;#nbsp;gold_payback · s5#nbsp;#nbsp;")]:::planned
+  GBS[("#nbsp;#nbsp;gold_budget_scenarios · n4#nbsp;#nbsp;")]:::planned
+  GAL[("#nbsp;#nbsp;gold_alerts · s6, s9#nbsp;#nbsp;")]:::planned
+
+  SIL --> N2 --> GWM & GWP & GRV
+  SIL --> N3a --> GFG & GRT
+  SIL --> N3b --> GFR
+  N3b -.-> GPB -.-> GBS
+  SIL --> N4 -.-> GAL
+  GRT -.-> N4
+```
+
+### Into the dashboard
+
+```mermaid
+flowchart LR
+  classDef silver fill:#e4e9ec,stroke:#5a6a74,color:#17232b
+  classDef gold fill:#f6e7a8,stroke:#9a7a0a,color:#17232b
   classDef planned fill:#ffffff,stroke:#93a3ad,color:#5a6a74,stroke-dasharray: 4 3
   classDef dash fill:#dcefe3,stroke:#2f7a4f,color:#17232b
 
-  subgraph BRONZE["Bronze (raw files)"]
-    DP[(daily_production)]:::bronze
-    WJ[(well_jobs)]:::bronze
-    PF[(production_failures)]:::bronze
-  end
+  ST[("#nbsp;#nbsp;silver_downtime#nbsp;#nbsp;")]:::silver
+  CL[("#nbsp;#nbsp;cleaning_log#nbsp;#nbsp;")]:::silver
+  GWM[("#nbsp;#nbsp;gold_well_month#nbsp;#nbsp;")]:::gold
+  GRT[("#nbsp;#nbsp;gold_recency_tier#nbsp;#nbsp;")]:::gold
+  GWP[("#nbsp;#nbsp;gold_well_period#nbsp;#nbsp;")]:::gold
+  GFG[("#nbsp;#nbsp;gold_failure_gap#nbsp;#nbsp;")]:::gold
+  GRV[("#nbsp;#nbsp;gold_ranking_validation#nbsp;#nbsp;")]:::gold
+  GFD[("#nbsp;#nbsp;gold_failure_downtime#nbsp;#nbsp;")]:::gold
+  GPB[("#nbsp;#nbsp;gold_payback#nbsp;#nbsp;")]:::planned
+  GBS[("#nbsp;#nbsp;gold_budget_scenarios#nbsp;#nbsp;")]:::planned
+  GAL[("#nbsp;#nbsp;gold_alerts#nbsp;#nbsp;")]:::planned
 
-  N01a[[01a_clean_daily · f4]]:::nb
-  N01b[[01b_clean_jobs_failures · f5]]:::nb
-  N01c[[01c_downtime_features · f6]]:::nb
-  N01d[[01d_daily_checks · n1]]:::nb
-  N02a[[02a_ranking · s1, s4]]:::nb
-  N03a[[03a_repeat_failures · n2]]:::nb
-  N03b[[03b_runlife_payback · s2, s5]]:::nb
-  N04a[[04a_early_warning · s3, s6, s9]]:::nb
+  P1{{"#nbsp;Page 1 · n5#nbsp;<br>Where barrels and dollars go"}}:::dash
+  P2{{"#nbsp;Page 2 · s7#nbsp;<br>Weekly work list"}}:::dash
+  P3{{"#nbsp;Page 3 · s8#nbsp;<br>Payback and budget"}}:::dash
+  P4{{"#nbsp;Page 4 · s9#nbsp;<br>Watchlist and early warning"}}:::dash
 
-  SD[(silver_daily)]:::silver
-  SJ[(silver_jobs)]:::silver
-  SF[(silver_failures)]:::silver
-  CL[(cleaning_log)]:::silver
-  BM[(downtime_bucket_map)]:::silver
-  ST[(silver_downtime)]:::silver
-  FS[(feat_daily_sensor)]:::silver
-
-  GFD[(gold_failure_downtime)]:::gold
-  GWM[(gold_well_month)]:::gold
-  GWP[(gold_well_period)]:::gold
-  GRV[(gold_ranking_validation)]:::gold
-  GFG[(gold_failure_gap)]:::gold
-  GRT[(gold_recency_tier)]:::gold
-  GFR[(gold_failure_rates)]:::gold
-  GPB[(gold_payback · s5)]:::planned
-  GBS[(gold_budget_scenarios · n4)]:::planned
-  GAL[(gold_alerts · s6, s9)]:::planned
-
-  DB{{AI/BI dashboard · 4 pages}}:::dash
-
-  DP --> N01a --> SD & CL
-  WJ --> N01b
-  PF --> N01b --> SJ & SF
-  N01b --> CL
-  SD --> N01c --> BM & ST & FS
-  N01c --> CL
-  SD & ST & SF --> N01d --> GFD
-  SD & ST & SJ & SF --> N02a --> GWM & GWP & GRV
-  SF & SJ --> N03a --> GFG & GRT
-  SD & SF & SJ --> N03b --> GFR
-  GFD -.-> N03b -.-> GPB
-  GFG -.-> GBS
-  GPB -.-> GBS
-  SD & SF --> N04a
-  FS & GRT -.-> N04a -.-> GAL
-
-  GWP & GRT & GFG & GRV --> DB
-  ST & CL & GFD --> DB
-  GPB & GBS & GAL -.-> DB
+  ST & CL & GWM --> P1
+  GRT & GWP & GFG & GRV --> P2
+  GFD --> P3
+  GPB & GBS -.-> P3
+  GRT --> P4
+  GAL -.-> P4
 ```
 
 ### Run order
@@ -155,9 +228,9 @@ Row counts are from Databricks on Nov 21.
 
 | Table | Grain | Rows | Written by | Notes |
 |---|---|---|---|---|
-| `daily_production` | well × day | 5,075,590 | f1 (load) | 42 columns incl. `_rescued_data` from the loader |
-| `well_jobs` | one job | 15,610 | f1 | |
-| `production_failures` | one failure | 2,873 | f1 | Failure log is live only from Jun 2025 |
+| `daily_production` | well × day | 5,075,590 | f1: loaded from the volume `workspace.dsmlc.dataset` (no notebook in the repo) | 42 columns incl. `_rescued_data` from the loader |
+| `well_jobs` | one job | 15,610 | f1 (same load) | |
+| `production_failures` | one failure | 2,873 | f1 (same load) | Failure log is live only from Jun 2025 |
 
 ### Silver and supporting
 
