@@ -68,7 +68,8 @@ Data limits that shape the method:
 
 ```
 notebooks/        Databricks notebooks, run in order
-  01_clean          bronze → silver tables, cleaning log
+  01_clean_daily    bronze → silver_daily, cleaning log
+  01_clean_jobs_failures  bronze → silver_jobs, silver_failures (failures linked to repair jobs)
   02_ranking        gold tables, cost score, out-of-time validation
   03_runlife_payback  failure rates by equipment, break-even payback
   04_early_warning  threshold rules, 2025 tuning, 2026 test
@@ -83,10 +84,16 @@ decision/         team planning pages (research question vote, build plan)
 ## How to reproduce
 
 1. Upload the three Parquet files to a Unity Catalog volume in a Databricks workspace.
-2. Run `notebooks/01_clean` to `notebooks/04_early_warning` in order on a serverless or single-node cluster.
+2. Run the `notebooks/01_*` cleaning notebooks, then `02_ranking` to `04_early_warning`, in order on serverless compute.
 3. Import the dashboard from `dashboard/`.
 
 Credentials are never stored in the notebooks or this repo. Use Databricks secrets or environment variables.
+
+Team docs:
+
+- [Databricks API and token setup](docs/databricks_api_token_setup.md): connecting the CLI or Python SDK from a laptop
+- [Databricks ↔ GitHub working practice](docs/databricks_github_practice.md): Git folders, notebook ownership, table rules
+- [Known issues](docs/known_issues.md): data problems found after the silver freeze
 
 ## Methods
 
