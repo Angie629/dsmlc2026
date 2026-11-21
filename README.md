@@ -78,7 +78,7 @@ notebooks/        Databricks notebooks, run in order
   02a_ranking        gold_well_month, gold_well_period, cost score and ranks; out-of-time validation (gold_ranking_validation)
   03a_repeat_failures  re-failure@30/90, Rod Truck repeat rate by year, recency tiers (gold_failure_gap, gold_recency_tier)
   03b_runlife_payback  failure rates by pump make, model and RPM within area (gold_failure_rates); payback added next
-  04a_early_warning  sensors before failures (coverage, repeated readings, stop-day alignment); threshold rules next
+  04a_early_warning  sensors before failures, threshold grid, holdout evaluation and gold alert outputs
   (05 reserved for weather: not used, power downtime is not seasonal)
 src/              shared cleaning and feature functions
 dashboard/        exported AI/BI dashboard definition and screenshots
@@ -101,6 +101,8 @@ Team docs:
 - [Databricks ↔ GitHub working practice](docs/databricks_github_practice.md): Git folders, notebook ownership, table rules
 - [Known issues](docs/known_issues.md): data problems found after the silver freeze
 - [Notebooks and data flow](docs/notebooks_and_data_flow.md): naming conventions, data-flow diagram, and every Databricks table with its grain, writer and users
+- [Reliability Desk dashboard JSON](dashboard/strathcona_reliability_desk.json): machine-readable pages, queries and widget layout
+- [Reliability Desk dashboard specification](dashboard/strathcona_reliability_desk.md): page brief, palette, formats and acceptance checks
 - [Build plan](docs/build_plan.md): tasks, owners, definitions and sourced inputs (snapshot of the team's live plan page)
 
 ## Methods
