@@ -215,7 +215,7 @@ flowchart LR
 | `02a_ranking.py` | s1, s4 | Angie | `silver_daily`, `silver_downtime`, `silver_jobs`, `silver_failures` | `gold_well_month`, `gold_well_period`, `gold_ranking_validation` | s1 ran (netback C$32.50); s4 written and tested, not yet run in Databricks |
 | `03a_repeat_failures.py` | n2 | Jacob | `silver_failures`, `silver_jobs` | `gold_failure_gap`, `gold_recency_tier` | Ran |
 | `03b_runlife_payback.py` | s2, s5 | Jacob | `silver_daily`, `silver_failures`, `silver_jobs`, `gold_failure_downtime`, `gold_well_period` (netback) | `gold_failure_rates`, `gold_payback` | Both ran in Databricks. s5 is on branch `jacob_tasks` until merged |
-| `04a_early_warning.py` | s3 (s6, s9 next) | Ananya | `silver_daily`, `silver_failures` (+ `feat_daily_sensor`, `gold_recency_tier` for s6/s9) | Nothing yet (+ `gold_alerts` for s6/s9) | s3 done locally; s6/s9 not written |
+| `04a_early_warning.py` | s3, s6, s9 | Ananya | `silver_daily`, `silver_downtime`, `feat_daily_sensor`, `gold_failure_downtime` (stop days), `silver_failures` (recency baseline) | `gold_warning_eval`, `gold_alerts` | s3 done; s6/s9 written, run in Databricks to freeze thresholds and create the tables |
 
 Task n3 (strategy case and 30/60/90 plan) has no notebook; it uses the outputs above.
 
