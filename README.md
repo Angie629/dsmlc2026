@@ -78,7 +78,7 @@ notebooks/        Databricks notebooks, run in order
   02a_ranking        gold_well_month, gold_well_period, cost score and ranks; out-of-time validation (gold_ranking_validation)
   03a_repeat_failures  re-failure@30/90, Rod Truck repeat rate by year, recency tiers (gold_failure_gap, gold_recency_tier)
   03b_runlife_payback  failure rates by pump make, model and RPM within area (gold_failure_rates); payback added next
-  04a_early_warning  sensors before failures (coverage, repeated readings, stop-day alignment); threshold rules next
+  04a_early_warning  sensors before failures, threshold grid, holdout evaluation and gold alert outputs
   (05 reserved for weather: not used, power downtime is not seasonal)
 src/              shared cleaning and feature functions
 dashboard/        AI/BI dashboard: strathcona_reliability_desk.lvdash.json + build_reliability_desk.py (tests every query)
