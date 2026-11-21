@@ -8,7 +8,7 @@
 # MAGIC **Question:** which pump makes, models and operating speeds are associated with more downhole failures per year of running, comparing wells in the same operating area?
 # MAGIC
 # MAGIC **Method**
-# MAGIC - Window: 2025-01-01 to 2026-10-27, the only period with a failure log (1,230 + 1,641 failures; 2 before 2025).
+# MAGIC - Window: 2025-06-01 to 2026-10-27. The failure log is live only from Jun 2025 (Jan–Apr 2025: 3 rows, May: 27, then ~160–180 a month). Starting earlier would add running time with almost no logged failures and understate every rate.
 # MAGIC - Exposure: producing well-years = Σ `runtime_frac` / 365 over producing well-days, so shut-in time doesn't count.
 # MAGIC - Equipment is taken **per day**, so a well that changed pump make contributes exposure and failures to each make for the days it ran it.
 # MAGIC - Rate = failures ÷ well-years, with a Poisson 95% interval (Byar's approximation, no extra packages).
@@ -31,7 +31,7 @@ FAILURES = f"{CATALOG_SCHEMA}.silver_failures"
 JOBS = f"{CATALOG_SCHEMA}.silver_jobs"
 RATES_TARGET = f"{CATALOG_SCHEMA}.gold_failure_rates"
 
-WINDOW = ("2025-01-01", "2026-10-27")
+WINDOW = ("2025-06-01", "2026-10-27")
 DOWNHOLE_TYPES = ["Rods", "Pump", "Tubing"]
 MIN_WELLS = 20
 MIN_FAILURES = 10
@@ -257,7 +257,7 @@ for ax, area in zip(axes.flat, top_areas):
     ax.set_yticklabels([f"{m} ({w} wells)" for m, w in zip(g["group_value"], g["wells"])])
     ax.set_title(area)
     ax.set_xlabel("Downhole failures per producing well-year")
-fig.suptitle("Failure rate by pump make, 2025-01 to 2026-10 (95% Poisson intervals)")
+fig.suptitle("Failure rate by pump make, Jun 2025 to Oct 2026 (95% Poisson intervals)")
 fig.tight_layout()
 display(fig)
 
@@ -306,7 +306,7 @@ producing_wells = days.select("uwi").distinct()
 display(
     producing_wells.join(well_mentions, "uwi", "left").fillna(0)
     .agg(
-        F.count("*").alias("producing_wells_2025_26"),
+        F.count("*").alias("producing_wells_in_window"),
         F.sum("corod").alias("wells_with_corod_in_job_text"),
         F.sum("sucker").alias("wells_with_sucker_rod_in_job_text"),
         F.sum(((F.col("corod") + F.col("sucker")) > 0).cast("int")).alias("wells_with_either"),

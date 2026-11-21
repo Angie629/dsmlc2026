@@ -29,13 +29,13 @@ Profiling of the competition data (Nov 20, 2026) shows the cost is concentrated 
 
 | Measure | Value |
 |---|---|
-| Rod Truck + Workover jobs, 2021–26 (field estimate > 0) | 11,785 jobs, $212.4M |
-| Failures from the top 10% / top 20% of wells producing oil since 2025 (1,150 wells) | 40% / 63% |
-| Failures from wells with 3 or more failures (377 wells) | 79% |
-| Lost oil on downhole downtime codes | 213,499 m³ |
-| Top-10% wells by repair job count in 2021–23 still top 10% in 2024–26 | 31% (about 3× random) |
+| Rod Truck + Workover repair spend since Jun 2025 (field estimates) | $64.1M over 975 wells, about $46M a year |
+| Repair $ held by the top 10% / top 20% of those wells | 33% / 50% |
+| Failures followed by another on the same well within 90 days (Jun 2025 on) | 57% (rods 65%, pump and tubing about 30%) |
+| Failures from wells with 3 or more failures | 79% |
+| Lost oil on downhole downtime codes | 213,499 m³ (3 codes only; full bucket map pending) |
 
-A short, regularly refreshed list of wells lets reliability engineers and field crews focus where the money is.
+Rod failures are chronic, not one-off. A short, regularly refreshed list of repeat-failure wells lets reliability engineers and field crews focus where the money is.
 
 ## Summary of findings
 
@@ -60,7 +60,10 @@ Join key: `uwi`. Events are aggregated to well × day or well × month before jo
 
 Data limits that shape the method:
 
-- The failure log is almost entirely 2025–2026 (2 failures before 2025). Earlier history uses Rod Truck and Workover jobs as a stand-in; 2,812 of 2,873 failures have one of those jobs on the same well within −3 to +14 days.
+- The failure log is live only from June 2025 (Jan–Apr 2025: 3 rows, May: 27, then about 160–180 a month). Earlier history uses Rod Truck and Workover jobs as a stand-in; 2,812 of 2,873 failures have one of those jobs on the same well within −3 to +14 days.
+- Rod Truck job cost is missing before 2023 (0.1% of jobs costed in 2021, 40% in 2022, 99.5%+ from 2023), so cost-based ranking starts in 2023.
+- `failure_start_date` is logged after the well stops: 66% of 2025 rod/pump failures were already down on that day or the day before (median 2 days earlier). Early warning and lost oil are anchored on the stop day.
+- Rod torque, motor current and RPM repeat the previous day's value 90–96% of the time, so they behave like periodic manual entries rather than daily sensor readings.
 - `failure_end_date` and `actual_final_job_cost` are empty. Repair cost uses `field_est_total`, a field estimate.
 - `lost_oil_m3` is an operator estimate and is null on 67.5% of daily rows.
 
@@ -73,7 +76,7 @@ notebooks/        Databricks notebooks, run in order
   01_downtime_features    downtime buckets, silver_downtime, rolling pump-sensor features (needs silver_daily)
   02_ranking        gold_well_month, gold_well_period, cost score and ranks (validation added next)
   03_runlife_payback  failure rates by pump make, model and RPM within area (gold_failure_rates); payback added next
-  04_early_warning  threshold rules, 2025 tuning, 2026 test
+  04_early_warning  sensors before failures (coverage, repeated readings, stop-day alignment); threshold rules next
   05_weather        optional weather join
 src/              shared cleaning and feature functions
 dashboard/        exported AI/BI dashboard definition and screenshots
@@ -116,14 +119,14 @@ cost_score = repair_$ + downhole_lost_oil_m3 × 6.2898 × netback_per_bbl
 
 **Equipment comparison.** Failures per producing well-year by pump make and model, compared within operating areas, with Poisson 95% intervals and a minimum group size.
 
-**Payback.** Cost per failure (linked repair job + lost oil from day −1 to +14) against the annualized cost of an action, giving a break-even number of failures avoided per well-year, with a sensitivity grid.
+**Payback.** Cost per failure (linked repair job + downhole lost oil from the day the well stopped to 14 days after the logged failure date) against the annualized cost of an action, giving a break-even number of failures avoided per well-year, with a sensitivity grid.
 
-**Early warning.** Rules on 7-day vs 30-day baseline changes in rod torque, motor current and pump efficiency, on days the well ran at least 12 hours. An alert counts as a hit if a failure follows within 1–30 days.
+**Early warning.** Rules on runtime instability (partial-run and fully down days in the last week) and on 7-day vs baseline drops in pump efficiency and fluid rate. Torque and current are not used because their values repeat day to day. An alert counts as a hit if the well stops for a failure 2–30 days later. The baseline to beat is a recency watchlist: wells with 2+ failures in the last 90 days.
 
 ## Validation
 
-- **Ranking:** out of time. Rank on 2021–2023, measure the share of 2024–2026 cost captured by the top 5/10/20% of wells. Compare with random selection and with ranking by oil volume. 95% intervals by bootstrap over wells.
-- **Early warning:** thresholds chosen on 2025 failures and frozen before testing on 2026 failures. Precision, recall, median lead time and alerts per area per week, compared with random alerts at the same rate.
+- **Ranking:** out of time. Rank on 2023–2024, measure the share of June 2025 – October 2026 cost captured by the top 5/10/20% of wells. Compare with random selection, with ranking by oil volume, and with a recency watchlist (2+ failures in the last 90 days). 95% intervals by bootstrap over wells.
+- **Early warning:** thresholds on runtime instability and efficiency, chosen on June–December 2025 failures (aligned to the stop day) and frozen before testing on January–October 2026. Precision, recall, median lead time and alerts per area per week, compared with the recency watchlist and with random alerts at the same rate.
 - **Payback:** sensitivity to netback, action cost and failure-reduction rate. Equipment effects are observational and reported as associations.
 
 ## Limitations

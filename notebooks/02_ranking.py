@@ -4,7 +4,7 @@
 # MAGIC
 # MAGIC Build plan task s1. Needs all `01_*` notebooks. Writes:
 # MAGIC - `workspace.dsmlc.gold_well_month`: one row per `uwi` × month
-# MAGIC - `workspace.dsmlc.gold_well_period`: one row per `uwi` × period (train 2021–23, test 2024–26), with the cost score and ranks
+# MAGIC - `workspace.dsmlc.gold_well_period`: one row per `uwi` × period (train 2023–24, test Jun 2025 – Oct 2026), with the cost score and ranks
 # MAGIC
 # MAGIC Out-of-time validation of the ranking (task s4) builds on `gold_well_period`.
 # MAGIC
@@ -33,8 +33,8 @@ MONTH_TARGET = f"{CATALOG_SCHEMA}.gold_well_month"
 PERIOD_TARGET = f"{CATALOG_SCHEMA}.gold_well_period"
 
 BBL_PER_M3 = 6.2898
-TRAIN = ("2021-01-01", "2023-12-31")
-TEST = ("2024-01-01", "2026-10-27")
+TRAIN = ("2023-01-01", "2024-12-31")
+TEST = ("2025-06-01", "2026-10-27")
 MIN_PRODUCING_DAYS = 30
 
 _nb = dbutils.widgets.get("netback_cad_per_bbl").strip()
@@ -101,7 +101,7 @@ month_attrs = (
 # MAGIC
 # MAGIC - Downtime by bucket from `silver_downtime`. Downhole lost oil feeds the score; the other buckets are kept for the dashboard.
 # MAGIC - Repair jobs are Rod Truck and Workover (`is_repair`), costed with `field_est_clean`, counted in the month the job starts.
-# MAGIC - Failures exist only from 2025 (2 earlier), so failure columns are for the dashboard and the 2025–26 analyses, not the 2021–23 score.
+# MAGIC - The failure log is live only from Jun 2025, so failure columns are for the dashboard and the test-window analyses, not the train score. Train starts in 2023 because Rod Truck cost is missing before then (0.1% of jobs costed in 2021, 40% in 2022, 99.5%+ from 2023).
 
 # COMMAND ----------
 
