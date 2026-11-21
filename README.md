@@ -101,8 +101,6 @@ Team docs:
 - [Databricks ↔ GitHub working practice](docs/databricks_github_practice.md): Git folders, notebook ownership, table rules
 - [Known issues](docs/known_issues.md): data problems found after the silver freeze
 - [Notebooks and data flow](docs/notebooks_and_data_flow.md): naming conventions, data-flow diagram, and every Databricks table with its grain, writer and users
-- [Reliability Desk dashboard JSON](dashboard/strathcona_reliability_desk.json): machine-readable pages, queries and widget layout
-- [Reliability Desk dashboard specification](dashboard/strathcona_reliability_desk.md): page brief, palette, formats and acceptance checks
 - [Build plan](docs/build_plan.md): tasks, owners, definitions and sourced inputs (snapshot of the team's live plan page)
 
 ## Methods
