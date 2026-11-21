@@ -1,8 +1,8 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # 04a · Early warning, part 1: what sensors show before failures · task s3 (s6, s9 next)
+# MAGIC # 04a · Early warning: sensors before failures and threshold rules · tasks s3, s6, s9
 # MAGIC
-# MAGIC Build plan task s3. Needs `01a_clean_daily` and `01b_clean_jobs_failures`. Read-only: writes no tables.
+# MAGIC Build plan tasks s3, s6, s9. Needs `01a_clean_daily`, `01b_clean_jobs_failures`, `01c_downtime_features` and `01d_daily_checks`. Sections 1–7 are read-only; section 8 writes `gold_warning_eval` and `gold_alerts`.
 # MAGIC
 # MAGIC Questions:
 # MAGIC 1. How many Jun–Dec 2025 rod/pump failures (the tuning window; the log is live from Jun 2025) have enough sensor data before them?
@@ -279,327 +279,250 @@ display(fig)
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 8. Draft and freeze threshold rules (tasks s6/s9)
+# MAGIC ## 8. Threshold rules: tune on 2025, freeze, test on 2026 (tasks s6, s9)
 # MAGIC
-# MAGIC Candidate rules use runtime instability and efficiency, not torque or current:
-# MAGIC - Partial-run days in the prior 7 days
-# MAGIC - Fully down days in the prior 7 days
-# MAGIC - Efficiency 7-day mean below a baseline threshold
+# MAGIC Candidate rules use runtime instability and pump efficiency, not torque or current (those repeat day to day):
+# MAGIC - partial-run days (0 < hours on < 23) in the last 7 days
+# MAGIC - fully down days in the last 7 days, **not counting** economic, planned or injection downtime
+# MAGIC - efficiency 7-day mean below its baseline by a set number of points (`efficiency_chg` from `feat_daily_sensor`)
 # MAGIC
-# MAGIC Suppression keeps only one alert per well in a 14-day window. Thresholds are
-# MAGIC selected only on 2025 and then frozen before the 2026 holdout is evaluated.
+# MAGIC Rules run only on days a well is **producing** (`flow_direction = 'production'`, `well_daily_status = 'Producing'`), so suspended, abandoned and injection wells never alert.
+# MAGIC
+# MAGIC **A hit** is an alert 2 to 30 days before the well stops for a rod, pump or tubing failure. The stop day comes from `gold_failure_downtime.stop_date`, the same definition used for payback. The day just before a stop is excluded because it is usually the partial-run day of the failure itself (68% of cases).
+# MAGIC
+# MAGIC One alert per well per 14 days. Thresholds are chosen on Jun–Dec 2025 only (recall ≥ 20%, 90th-percentile alerts per area-week ≤ 15, best precision) and frozen before the 2026 test. The recency watchlist (2+ failures in the last 90 days) is scored the same way as the baseline to beat.
+# MAGIC
+# MAGIC The daily features are built in Spark; pandas only handles small per-well arrays.
 
-import numpy as np
-import pandas as pd
+# COMMAND ----------
+
 from itertools import product
 
+DOWNTIME = f"{CATALOG_SCHEMA}.silver_downtime"
+SENSOR = f"{CATALOG_SCHEMA}.feat_daily_sensor"
+STOPS = f"{CATALOG_SCHEMA}.gold_failure_downtime"
+DATA_END = "2026-10-27"
 WINDOWS = {
-    "train_2025": dict(alert0="2025-06-01", alert1="2025-12-31",
-                       label0="2025-07-01", label1="2025-12-31"),
-    "eval_2026": dict(alert0="2026-01-01", alert1="2026-10-26",
-                      label0="2026-01-31", label1="2026-10-26"),
+    "2025 tuning": dict(alert0="2025-06-01", alert1="2025-12-31", label0="2025-07-01", label1="2025-12-31"),
+    "2026 holdout": dict(alert0="2026-01-01", alert1=DATA_END, label0="2026-01-31", label1=DATA_END),
 }
-
-
-def prep_warning_window(w):
-    a0, a1, l0, l1 = w["alert0"], w["alert1"], w["label0"], w["label1"]
-    dates = pd.date_range(a0, a1, freq="D")
-    d0 = dates[0]
-    d_count = len(dates)
-
-    sensor = (
-        spark.table(f"{CATALOG_SCHEMA}.feat_daily_sensor")
-        .where(F.col("production_date").between(a0, a1))
-        .select(
-            "uwi", "production_date", "field_operating_area",
-            "efficiency_7d", "efficiency_base", "efficiency_chg",
-        )
-        .toPandas()
-    )
-    sensor["production_date"] = pd.to_datetime(sensor["production_date"])
-    sensor = sensor.drop_duplicates(["uwi", "production_date"], keep="first")
-
-    runtime = (
-        spark.table(DAILY)
-        .where(F.col("production_date").between(a0, a1))
-        .select("uwi", "production_date", "field_operating_area",
-                "hours_on_prod")
-        .toPandas()
-    )
-    runtime["production_date"] = pd.to_datetime(runtime["production_date"])
-    runtime = runtime.drop_duplicates(["uwi", "production_date"], keep="first")
-
-    failures = (
-        spark.table(FAILURES)
-        .where(F.col("failure_start_date").isNotNull())
-        .select(
-            "failure_id", "uwi", "field_operating_area",
-            F.col("failure_start_date").cast("date").alias("logged_failure_date"),
-            "failure_type_norm",
-        )
-        .toPandas()
-    )
-    failures["logged_failure_date"] = pd.to_datetime(failures["logged_failure_date"])
-
-    wells = sorted(set(sensor["uwi"]) | set(runtime["uwi"]) | set(failures["uwi"]))
-    widx = {uwi: i for i, uwi in enumerate(wells)}
-    inverse_wells = {i: uwi for uwi, i in widx.items()}
-    W = len(wells)
-
-    area_sensor = (sensor.dropna(subset=["field_operating_area"])
-                   .groupby("uwi")["field_operating_area"].first())
-    area_failure = (failures.dropna(subset=["field_operating_area"])
-                    .sort_values("logged_failure_date")
-                    .groupby("uwi")["field_operating_area"].last())
-    area = area_sensor.reindex(wells).fillna(area_failure.reindex(wells)).fillna("Unknown").to_numpy()
-
-    partial = np.zeros((d_count, W), dtype=bool)
-    down = np.zeros((d_count, W), dtype=bool)
-    for row in runtime.itertuples(index=False):
-        wi = widx[row.uwi]
-        di = (row.production_date - d0).days
-        if 0 <= di < d_count:
-            hours = row.hours_on_prod
-            if pd.notna(hours):
-                partial[di, wi] = 0 < hours < 23
-                down[di, wi] = hours < 1
-
-    efficiency_drop = np.full((d_count, W), np.nan)
-    for row in sensor.itertuples(index=False):
-        wi = widx[row.uwi]
-        di = (row.production_date - d0).days
-        if 0 <= di < d_count and pd.notna(row.efficiency_7d) and pd.notna(row.efficiency_base):
-            efficiency_drop[di, wi] = row.efficiency_7d - row.efficiency_base
-
-    partial_7d = np.vstack([
-        np.sum(partial[max(0, d - 6):d + 1, :], axis=0)
-        for d in range(d_count)
-    ])
-    down_7d = np.vstack([
-        np.sum(down[max(0, d - 6):d + 1, :], axis=0)
-        for d in range(d_count)
-    ])
-
-    hit = np.zeros((d_count, W), dtype=bool)
-    stop_failures = []
-    for row in failures.itertuples(index=False):
-        if row.failure_type_norm not in ("Rods", "Pump", "Tubing"):
-            continue
-        wi = widx[row.uwi]
-        window = (
-            runtime[(runtime["uwi"] == row.uwi)
-                    & runtime["production_date"].between(row.logged_failure_date - pd.Timedelta(days=60),
-                                                         row.logged_failure_date)]
-            .sort_values("production_date")
-        )
-        if window.empty:
-            stop_day = row.logged_failure_date
-        else:
-            hours_by_date = dict(zip(
-                window["production_date"],
-                window["hours_on_prod"],
-            ))
-            stop_day = row.logged_failure_date
-            while stop_day >= row.logged_failure_date - pd.Timedelta(days=60):
-                hours = hours_by_date.get(stop_day, np.nan)
-                if pd.isna(hours) or hours >= 1:
-                    break
-                stop_day -= pd.Timedelta(days=1)
-
-        fi = (stop_day - d0).days
-        lo, hi = max(0, fi - 30), min(d_count, fi)
-        if hi > lo:
-            hit[lo:hi, wi] = True
-        if pd.Timestamp(l0) <= stop_day <= pd.Timestamp(l1):
-            stop_failures.append((wi, fi))
-
-    baseline = np.zeros((d_count, W), dtype=bool)
-    for uwi, group in failures.groupby("uwi"):
-        wi = widx[uwi]
-        failure_days = np.sort(
-            (group["logged_failure_date"] - d0).dt.days.to_numpy()
-        )
-        if len(failure_days) < 2:
-            continue
-        ds = np.arange(d_count)
-        count = (np.searchsorted(failure_days, ds, side="left")
-                 - np.searchsorted(failure_days, ds - 90, side="left"))
-        baseline[:, wi] = count >= 2
-
-    week = np.arange(d_count) // 7
-    covered_wells = (~np.isnan(efficiency_drop)).any(axis=0)
-    covered_wells |= partial_7d.any(axis=0)
-
-    return dict(
-        dates=dates, D=d_count, W=W, widx=widx, area=area, week=week,
-        partial_7d=partial_7d, down_7d=down_7d,
-        efficiency_drop=efficiency_drop, hit=hit,
-        label_fail=stop_failures, baseline=baseline,
-        covered_wells=covered_wells, wells=inverse_wells,
-    )
-
-
-PREP_WARNING = {name: prep_warning_window(w) for name, w in WINDOWS.items()}
-
-
-def apply_suppression(trigger, gap=14):
-    """Keep an alert only when > gap days since the last kept alert for that well."""
-    D, W = trigger.shape
-    selected = np.zeros_like(trigger, dtype=bool)
-    last = np.full(W, -10**9, dtype=np.int64)
-    for d in range(D):
-        fire = trigger[d] & (d - last > gap)
-        selected[d] = fire
-        last[fire] = d
-    return selected
-
-
-def warning_triggers(ctx, partial_days, down_days, efficiency_drop):
-    trigger = np.zeros((ctx["D"], ctx["W"]), dtype=bool)
-    if partial_days is not None:
-        trigger |= ctx["partial_7d"] >= partial_days
-    if down_days is not None:
-        trigger |= ctx["down_7d"] >= down_days
-    if efficiency_drop is not None:
-        trigger |= np.isfinite(ctx["efficiency_drop"]) & (
-            ctx["efficiency_drop"] <= -efficiency_drop
-        )
-    return trigger
-
-
-def evaluate_warning(selected, ctx):
-    alerts = int(selected.sum())
-    hits = int(ctx["hit"][selected].sum()) if alerts else 0
-    precision = hits / alerts if alerts else 0.0
-    covered_failures = sum(
-        1 for wi, fi in ctx["label_fail"]
-        if selected[max(0, fi - 30):fi, wi].any()
-    )
-    total_failures = len(ctx["label_fail"])
-    recall = covered_failures / total_failures if total_failures else 0.0
-
-    alerts_per_area_week = 0.0
-    lead_days = []
-    if alerts:
-        d_idx, w_idx = np.nonzero(selected)
-        counts = (
-            pd.DataFrame({"area": ctx["area"][w_idx], "week": ctx["week"][d_idx]})
-            .groupby(["area", "week"])
-            .size()
-        )
-        alerts_per_area_week = float(counts.quantile(0.90))
-        for wi, fi in ctx["label_fail"]:
-            alert_days = np.flatnonzero(selected[max(0, fi - 30):fi, wi])
-            if len(alert_days):
-                first_offset = alert_days[0]
-                alert_day = max(0, fi - 30) + first_offset
-                lead_days.append(fi - alert_day)
-
-    return dict(
-        alerts=alerts,
-        hits=hits,
-        precision=round(precision, 3),
-        recall=round(recall, 3),
-        alerts_per_area_week=round(alerts_per_area_week, 1),
-        median_lead_days=round(float(np.median(lead_days)), 1) if lead_days else None,
-        covered_failures=covered_failures,
-        label_failures=total_failures,
-    )
-
-
-train_warning = PREP_WARNING["train_2025"]
-
+LEAD_MIN, LEAD_MAX = 2, 30
+SUPPRESS_DAYS = 14
+EXCLUDED_DOWN_BUCKETS = ("Economic", "Planned", "Injection")
+RECENCY_DAYS, RECENCY_MIN = 90, 2
+CURRENT_DAYS = 14
+MIN_RECALL = 0.20
+MAX_ALERTS_AREA_WEEK_P90 = 15
 PARTIAL_GRID = [1, 2, 3, None]
 DOWN_GRID = [1, 2, 3, None]
 EFFICIENCY_GRID = [0.03, 0.05, 0.08, 0.12, None]
 
-warning_rows = []
-for partial_days, down_days, efficiency_drop in product(
-        PARTIAL_GRID, DOWN_GRID, EFFICIENCY_GRID):
-    if partial_days is None and down_days is None and efficiency_drop is None:
-        continue
-    trigger = warning_triggers(train_warning, partial_days, down_days, efficiency_drop)
-    metrics = evaluate_warning(apply_suppression(trigger), train_warning)
-    warning_rows.append({
-        "partial_days": partial_days,
-        "down_days": down_days,
-        "efficiency_drop": efficiency_drop,
-        **metrics,
-    })
 
-warning_grid = pd.DataFrame(warning_rows)
-warning_ok = warning_grid[
-    (warning_grid["recall"] >= 0.20)
-    & (warning_grid["alerts_per_area_week"] <= 15)
-]
+def feature_sql(a0, a1):
+    excluded = ", ".join(f"'{b}'" for b in EXCLUDED_DOWN_BUCKETS)
+    return f"""
+WITH d AS (
+  SELECT s.uwi, s.production_date, s.field_operating_area, s.well_daily_status,
+         DATEDIFF(s.production_date, DATE'2020-01-01') AS dn,
+         CASE WHEN s.hours_on_prod > 0 AND s.hours_on_prod < 23 THEN 1 ELSE 0 END AS partial,
+         CASE WHEN s.hours_on_prod < 1 AND COALESCE(dt.bucket, 'Uncoded') NOT IN ({excluded}) THEN 1 ELSE 0 END AS down
+  FROM {DAILY} s
+  LEFT JOIN {DOWNTIME} dt ON dt.uwi = s.uwi AND dt.production_date = s.production_date
+  WHERE s.flow_direction = 'production' AND s.production_date BETWEEN date_sub(DATE'{a0}', 6) AND DATE'{a1}'),
+r AS (
+  SELECT *,
+         SUM(partial) OVER (PARTITION BY uwi ORDER BY dn RANGE BETWEEN 6 PRECEDING AND CURRENT ROW) AS partial_7d,
+         SUM(down) OVER (PARTITION BY uwi ORDER BY dn RANGE BETWEEN 6 PRECEDING AND CURRENT ROW) AS down_7d
+  FROM d)
+SELECT r.uwi, r.production_date, r.field_operating_area, r.partial_7d, r.down_7d, f.efficiency_chg
+FROM r LEFT JOIN {SENSOR} f ON f.uwi = r.uwi AND f.production_date = r.production_date
+WHERE r.production_date BETWEEN DATE'{a0}' AND DATE'{a1}' AND r.well_daily_status = 'Producing'"""
 
-if warning_ok.empty:
-    raise ValueError("No 2025 threshold setting meets recall >=20% and 15 alerts/area/week")
 
-warning_best = warning_ok.sort_values(
-    ["precision", "alerts"], ascending=[False, True]
-).iloc[0]
+STOPS_SQL = f"SELECT uwi, stop_date FROM {STOPS} WHERE stop_date IS NOT NULL"
+FAILURES_SQL = f"SELECT uwi, failure_start_date FROM {FAILURES} WHERE failure_start_date >= DATE'2025-06-01'"
 
-CHOSEN_WARNING = dict(
-    partial_days=None if pd.isna(warning_best.partial_days) else int(warning_best.partial_days),
-    down_days=None if pd.isna(warning_best.down_days) else int(warning_best.down_days),
-    efficiency_drop=None if pd.isna(warning_best.efficiency_drop) else float(warning_best.efficiency_drop),
-)
-print("FROZEN 2025 threshold rules:", CHOSEN_WARNING)
 
-warning_eval_rows = []
-gold_alert_rows = []
-
-for window_name, tag in (("train_2025", "2025 tuning"),
-                         ("eval_2026", "2026 holdout")):
-    ctx = PREP_WARNING[window_name]
-    sensor_trigger = warning_triggers(
-        ctx,
-        CHOSEN_WARNING["partial_days"],
-        CHOSEN_WARNING["down_days"],
-        CHOSEN_WARNING["efficiency_drop"],
+def load_window(w):
+    return (
+        spark.sql(feature_sql(w["alert0"], w["alert1"])).toPandas(),
+        spark.sql(STOPS_SQL).toPandas(),
+        spark.sql(FAILURES_SQL).toPandas(),
     )
-    sensor_selected = apply_suppression(sensor_trigger)
 
-    baseline_selected = apply_suppression(ctx["baseline"])
-    sensor_baseline_selected = sensor_selected | baseline_selected
+# COMMAND ----------
 
-    for rule_name, selected, is_baseline in (
-        ("runtime_efficiency", sensor_selected, False),
-        ("recency_2plus_90d", baseline_selected, True),
-        ("sensor_or_recency", sensor_baseline_selected, False),
-    ):
-        metrics = evaluate_warning(selected, ctx)
-        warning_eval_rows.append({
-            "window": tag,
-            "rule_name": rule_name,
-            "is_baseline": is_baseline,
-            **metrics,
-        })
+def to_day(s):
+    s = pd.to_datetime(s)
+    return (s.dt.tz_localize(None) if s.dt.tz is not None else s).dt.normalize()
 
-    d_idx, w_idx = np.nonzero(sensor_selected)
-    for di, wi in zip(d_idx, w_idx):
-        gold_alert_rows.append({
-            "alert_date": ctx["dates"][di].date(),
-            "uwi": ctx["wells"][wi],
-            "rule_name": "runtime_efficiency",
-            "window": tag,
-        })
 
-warning_eval = pd.DataFrame(warning_eval_rows)
-display(warning_grid.sort_values("precision", ascending=False).head(12))
-display(warning_eval)
+def prepare(feat, stops, fails, w):
+    """Day x well arrays for one window. Rows are days from alert0 to alert1, columns are wells."""
+    dates = pd.date_range(w["alert0"], w["alert1"], freq="D")
+    d0, D = dates[0], len(dates)
+    feat = feat.assign(production_date=to_day(feat.production_date))
+    stops = stops.assign(stop_date=to_day(stops.stop_date))
+    fails = fails.assign(failure_start_date=to_day(fails.failure_start_date))
 
-# Persist the dashboard contract.
-holdout_eval = warning_eval.loc[warning_eval["window"] == "2026 holdout"].copy()
-holdout_eval = holdout_eval[[
-    "rule_name", "is_baseline", "precision", "recall",
-    "alerts_per_area_week", "median_lead_days",
-]]
-spark.createDataFrame(holdout_eval).write.mode("overwrite").option("overwriteSchema", "true") \
-    .saveAsTable(f"{CATALOG_SCHEMA}.gold_warning_eval")
+    wells = pd.Index(sorted(set(feat.uwi) | set(stops.uwi) | set(fails.uwi)))
+    W = len(wells)
+    wi = wells.get_indexer(feat.uwi)
+    di = (feat.production_date - d0).dt.days.to_numpy()
 
-if gold_alert_rows:
-    alert_df = pd.DataFrame(gold_alert_rows)
-    spark.createDataFrame(alert_df).write.mode("overwrite").option("overwriteSchema", "true") \
-        .saveAsTable(f"{CATALOG_SCHEMA}.gold_alerts")
+    active = np.zeros((D, W), dtype=bool)
+    partial_7d = np.zeros((D, W))
+    down_7d = np.zeros((D, W))
+    eff_chg = np.full((D, W), np.nan)
+    active[di, wi] = True
+    partial_7d[di, wi] = feat.partial_7d.to_numpy()
+    down_7d[di, wi] = feat.down_7d.to_numpy()
+    eff_chg[di, wi] = pd.to_numeric(feat.efficiency_chg).to_numpy(dtype=float)
+
+    area = (feat.dropna(subset=["field_operating_area"]).groupby("uwi").field_operating_area.agg(lambda s: s.mode().iloc[0])
+            .reindex(wells).fillna("Unknown").to_numpy())
+
+    hit = np.zeros((D, W), dtype=bool)
+    labels = []
+    l0, l1 = pd.Timestamp(w["label0"]), pd.Timestamp(w["label1"])
+    for uwi, stop in zip(stops.uwi, stops.stop_date):
+        k, fi = wells.get_loc(uwi), (stop - d0).days
+        lo, hi = max(0, fi - LEAD_MAX), min(D, fi - LEAD_MIN + 1)
+        if hi > lo:
+            hit[lo:hi, k] = True
+        if l0 <= stop <= l1:
+            labels.append((k, fi))
+
+    baseline = np.zeros((D, W), dtype=bool)
+    days = np.arange(D)
+    for uwi, g in fails.groupby("uwi"):
+        fd = np.sort((g.failure_start_date - d0).dt.days.to_numpy())
+        recent = np.searchsorted(fd, days, side="left") - np.searchsorted(fd, days - RECENCY_DAYS, side="left")
+        baseline[:, wells.get_loc(uwi)] = recent >= RECENCY_MIN
+    baseline &= active
+
+    week = days // 7
+    aw = pd.DataFrame({"area": np.repeat(area[None, :], D, axis=0)[active], "week": np.repeat(week[:, None], W, axis=1)[active]})
+    area_weeks = aw.drop_duplicates()
+
+    return dict(dates=dates, D=D, W=W, wells=wells, area=area, week=week, active=active,
+                partial_7d=partial_7d, down_7d=down_7d, eff_chg=eff_chg,
+                hit=hit, labels=labels, baseline=baseline, area_weeks=area_weeks)
+
+
+def suppress(trigger, gap=SUPPRESS_DAYS):
+    D, W = trigger.shape
+    kept = np.zeros_like(trigger)
+    last = np.full(W, -10**9)
+    for d in range(D):
+        fire = trigger[d] & (d - last > gap)
+        kept[d] = fire
+        last[fire] = d
+    return kept
+
+
+def rule_trigger(ctx, partial_days, down_days, efficiency_drop):
+    t = np.zeros((ctx["D"], ctx["W"]), dtype=bool)
+    if partial_days is not None:
+        t |= ctx["partial_7d"] >= partial_days
+    if down_days is not None:
+        t |= ctx["down_7d"] >= down_days
+    if efficiency_drop is not None:
+        t |= np.isfinite(ctx["eff_chg"]) & (ctx["eff_chg"] <= -efficiency_drop)
+    return t & ctx["active"]
+
+
+def evaluate(selected, ctx):
+    alerts = int(selected.sum())
+    hits = int(ctx["hit"][selected].sum())
+    caught, leads = 0, []
+    for k, fi in ctx["labels"]:
+        lo, hi = max(0, fi - LEAD_MAX), min(ctx["D"], fi - LEAD_MIN + 1)
+        first = np.flatnonzero(selected[lo:hi, k]) if hi > lo else []
+        if len(first):
+            caught += 1
+            leads.append(fi - (lo + first[0]))
+    d_idx, w_idx = np.nonzero(selected)
+    per_aw = (pd.DataFrame({"area": ctx["area"][w_idx], "week": ctx["week"][d_idx]}).value_counts()
+              .rename("n").reset_index())
+    per_aw = ctx["area_weeks"].merge(per_aw, on=["area", "week"], how="left").fillna({"n": 0})
+    n_labels = len(ctx["labels"])
+    return dict(
+        alerts=alerts,
+        hits=hits,
+        precision=round(hits / alerts, 3) if alerts else 0.0,
+        recall=round(caught / n_labels, 3) if n_labels else 0.0,
+        alerts_per_area_week=round(float(per_aw.n.mean()), 2),
+        alerts_per_area_week_p90=round(float(per_aw.n.quantile(0.9)), 1),
+        median_lead_days=float(np.median(leads)) if leads else None,
+        failures_caught=caught,
+        label_failures=n_labels,
+    )
+
+
+PREP = {name: prepare(*load_window(w), w) for name, w in WINDOWS.items()}
+for name, ctx in PREP.items():
+    print(f"{name}: {ctx['W']:,} wells, {int(ctx['active'].sum()):,} producing well-days, {len(ctx['labels']):,} failures to catch")
+
+# COMMAND ----------
+
+# DBTITLE 1,Tune on 2025 and freeze
+tune = PREP["2025 tuning"]
+rows = []
+for p, dn, e in product(PARTIAL_GRID, DOWN_GRID, EFFICIENCY_GRID):
+    if p is None and dn is None and e is None:
+        continue
+    rows.append({"partial_days": p, "down_days": dn, "efficiency_drop": e, **evaluate(suppress(rule_trigger(tune, p, dn, e)), tune)})
+grid = pd.DataFrame(rows)
+ok = grid[(grid.recall >= MIN_RECALL) & (grid.alerts_per_area_week_p90 <= MAX_ALERTS_AREA_WEEK_P90)]
+if ok.empty:
+    raise ValueError(f"No 2025 setting reaches recall >= {MIN_RECALL:.0%} with p90 alerts per area-week <= {MAX_ALERTS_AREA_WEEK_P90}")
+best = ok.sort_values(["precision", "alerts"], ascending=[False, True]).iloc[0]
+FROZEN = {k: (None if pd.isna(best[k]) else (float(best[k]) if k == "efficiency_drop" else int(best[k])))
+          for k in ["partial_days", "down_days", "efficiency_drop"]}
+print("Frozen on 2025:", FROZEN)
+display(spark.createDataFrame(grid.sort_values("precision", ascending=False).head(15).astype({"partial_days": "float", "down_days": "float", "efficiency_drop": "float"})))
+
+# COMMAND ----------
+
+# DBTITLE 1,Test the frozen rule on 2026 against the recency watchlist
+eval_rows, alert_rows = [], []
+for name, ctx in PREP.items():
+    rule = suppress(rule_trigger(ctx, **FROZEN))
+    base = suppress(ctx["baseline"])
+    for rule_name, sel, is_base in (("Runtime + efficiency rule", rule, False),
+                                    ("Recency watchlist (2+ in 90 days)", base, True),
+                                    ("Rule or watchlist", rule | base, False)):
+        eval_rows.append({"window": name, "rule_name": rule_name, "is_baseline": is_base, **evaluate(sel, ctx), **FROZEN})
+    d_idx, w_idx = np.nonzero(rule)
+    alert_rows.append(pd.DataFrame({
+        "alert_date": ctx["dates"][d_idx].date, "uwi": ctx["wells"][w_idx], "field_operating_area": ctx["area"][w_idx],
+        "rule_name": "Runtime + efficiency rule", "window": name,
+        "partial_7d": ctx["partial_7d"][d_idx, w_idx], "down_7d": ctx["down_7d"][d_idx, w_idx], "efficiency_chg": ctx["eff_chg"][d_idx, w_idx],
+    }))
+
+warning_eval = pd.DataFrame(eval_rows)
+alerts = pd.concat(alert_rows, ignore_index=True)
+alerts["is_current"] = pd.to_datetime(alerts.alert_date) > pd.Timestamp(DATA_END) - pd.Timedelta(days=CURRENT_DAYS)
+display(spark.createDataFrame(warning_eval.astype({"partial_days": "float", "down_days": "float", "efficiency_drop": "float", "median_lead_days": "float"})))
+
+spark.createDataFrame(warning_eval.astype({"partial_days": "float", "down_days": "float", "efficiency_drop": "float", "median_lead_days": "float"})) \
+    .write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(f"{CATALOG_SCHEMA}.gold_warning_eval")
+spark.createDataFrame(alerts).write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(f"{CATALOG_SCHEMA}.gold_alerts")
+
+# COMMAND ----------
+
+hold = warning_eval[warning_eval.window == "2026 holdout"].set_index("rule_name")
+s6_checks = {
+    "thresholds chosen on 2025 only": set(grid.columns) >= {"precision", "recall"} and tune is PREP["2025 tuning"],
+    "no alerts on non-producing days": all(not (suppress(rule_trigger(c, **FROZEN)) & ~c["active"]).any() for c in PREP.values()),
+    "precision and recall between 0 and 1": bool(warning_eval.precision.between(0, 1).all() and warning_eval.recall.between(0, 1).all()),
+    "one row per window and rule": not warning_eval.duplicated(["window", "rule_name"]).any(),
+}
+for name, ok_ in s6_checks.items():
+    print(("PASS " if ok_ else "FAIL ") + name)
+print("2026 holdout:")
+print(hold[["precision", "recall", "alerts", "alerts_per_area_week", "median_lead_days"]].to_string())
+beats = hold.loc["Runtime + efficiency rule", "precision"] > hold.loc["Recency watchlist (2+ in 90 days)", "precision"]
+print("Rule beats the watchlist on precision:" if beats else "Rule does NOT beat the watchlist on precision: ship the watchlist as the early warning (risk 1 fallback).")
+assert all(s6_checks.values()), "One or more checks failed"
