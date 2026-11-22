@@ -1,6 +1,6 @@
 # Bad Actors: Targeting Repeat-Failure Wells
 
-*Working title.* Strathcona Resources × Chirality Research Datathon, November 2026. Theme: Optimization.
+_Working title._ Strathcona Resources × Chirality Research Datathon, November 2026. Theme: Optimization.
 
 **Solution form:** (3) Implementation / recommendation plan, backed by a Databricks AI/BI dashboard.
 
@@ -27,34 +27,35 @@ Every producing heavy oil well here is lifted by a progressing cavity pump (PCP)
 
 Profiling of the competition data (Nov 20, 2026) shows the cost is concentrated in a small set of wells:
 
-| Measure | Value |
-|---|---|
-| Rod Truck + Workover repair spend since Jun 2025 (field estimates) | $64.1M over 975 wells, about $46M a year |
-| Repair $ held by the top 10% / top 20% of those wells | 33% / 50% |
-| Failures followed by another on the same well within 90 days (Jun 2025 on) | 57% (rods 65%, pump and tubing about 30%) |
-| Failures from wells with 3 or more failures | 79% |
-| Lost oil on downhole downtime codes | 213,499 m³ (3 codes only; full bucket map pending) |
+| Measure                                                                    | Value                                              |
+| -------------------------------------------------------------------------- | -------------------------------------------------- |
+| Rod Truck + Workover repair spend since Jun 2025 (field estimates)         | $64.1M over 975 wells, about $46M a year           |
+| Repair $ held by the top 10% / top 20% of those wells                      | 33% / 50%                                          |
+| Failures followed by another on the same well within 90 days (Jun 2025 on) | 57% (rods 65%, pump and tubing about 30%)          |
+| Failures from wells with 3 or more failures                                | 79%                                                |
+| Lost oil on downhole downtime codes                                        | 213,499 m³ (3 codes only; full bucket map pending) |
 
 Rod failures are chronic, not one-off. A short, regularly refreshed list of repeat-failure wells lets reliability engineers and field crews focus where the money is.
 
 ## Summary of findings
 
-*Pending. Filled in after validation (Saturday 8 PM).*
+Rod Truck and Workover repairs cost about C$33M a year (field estimates, Jun 2025 – Oct 2026), plus C$8.4M of downhole lost oil over the same period. The money concentrates on wells that keep failing. *Dashboard: [Cost Drivers](dashboard/Cost%20Drivers.png).* Each bullet names the dashboard tab it comes from; the links open the screenshots.
 
-- Ranking: capture@10% and lift vs random and size baselines
-- Equipment: failure-rate differences within operating areas
-- Payback: break-even failure reduction for the 2 chosen actions
-- Early warning: 2026 hold-out precision, recall and lead time
+- **Failures repeat, and recent failures are the strongest warning.** 57% of failures are followed by another on the same well within 90 days (rods: about two in three). Wells with 0 / 1 / 2 / 3+ failures in the last 90 days fail again within 90 days 26% / 40% / 61% / 70% of the time. Today's watchlist (2+ recent failures) is 114 wells holding 24.9% of the last 12 months' repair spend on wells with a logged failure. *Dashboard: [Recurrence Analysis](dashboard/Recurrence%20Analysis.png); watchlist on [Work Order Priorities](dashboard/Work%20Order%20Priorities.png).*
+- **Long-history ranking helps only modestly.** Ranked on pre-Jun 2025 history and tested on later cost, the top 10% of wells catch 16.5% of later cost (95% interval 14.3–19.9%, 1.65× random). That is about the same as ranking by well size (15.9%), so the work list leads with recent failures and uses cost second. *Dashboard: [Model Validation](dashboard/Model%20Validation.png).*
+- **Two actions pay back in about 2 years if they halve failures.** Rods are 76% of failures but 42% of repair dollars; pump and tubing are 22% of failures but 56% of dollars. A rod string upgrade or corrosion inhibition on 100 rod bad actors pays back in 1.8 years at 50% fewer failures (3.5 at 25%). Pump and tubing failure prevention on 26 wells pays back in 2.0 years (4.1 at 25%). Treating the top 25 wells costs C$0.85M and pays back in 1.1–2.3 years. In Cactus Lake, rods fail 0.55 times a year per well below 150 RPM vs 1.50 at 250–349 RPM, a cheap lever (an association, not a proven cause). *Dashboard: [Return on Action](dashboard/Return%20on%20Action%20-%20Budget.png) (payback, sensitivity, budget scenarios); failure vs dollar shares on [Cost Drivers](dashboard/Cost%20Drivers.png). The RPM rates are in `03b_runlife_payback` (`gold_failure_rates`), not on the dashboard.*
+- **The recency watchlist is the early warning; the runtime rule adds reach.** On the 2026 holdout, the watchlist is right 28.8% of the time and catches 35% of failures, a median 22 days ahead. Adding the rule "2+ partial-run days in a week" raises failures caught from 500 to 813 (of 1,432) for about 9 alerts per area per week. Alerts where both fire are right 34.1% of the time, so crews work those first. *Dashboard: [Model Validation](dashboard/Model%20Validation.png); current alerts on [Work Order Priorities](dashboard/Work%20Order%20Priorities.png). The tier split is in `04b_ml_challenger`, not on the dashboard.*
+- **A simple model beats the rules at the same workload, but only modestly.** Trained on 2025 and tested on 2026 with the same number of alerts as the rules, logistic regression and gradient-boosted trees gain 4–7 points of precision and catch 70–110 more failures (for example 36.8% vs 30.7% at the watchlist's volume). With short failure history and patchy torque data, we recommend the rules now and a model pilot as the next step. *Not on the dashboard: see [Alert tiers and an ML challenger](#alert-tiers-and-an-ml-challenger-2026-holdout) and `notebooks/04b_ml_challenger.py`.*
 
 ## Data
 
 Three Parquet files provided by the organizers (not included in this repo):
 
-| File | Grain | Rows | Wells | Dates |
-|---|---|---|---|---|
-| `daily_production.parquet` | well × day | 5,075,590 | 2,905 | 2021-01-01 to 2026-10-27 |
-| `well_jobs.parquet` | one job | 15,610 | 1,903 | 2021-01-01 to 2026-10-27 |
-| `production_failures.parquet` | one failure | 2,873 | 825 | 2021-12-14 to 2026-10-26 |
+| File                          | Grain       | Rows      | Wells | Dates                    |
+| ----------------------------- | ----------- | --------- | ----- | ------------------------ |
+| `daily_production.parquet`    | well × day  | 5,075,590 | 2,905 | 2021-01-01 to 2026-10-27 |
+| `well_jobs.parquet`           | one job     | 15,610    | 1,903 | 2021-01-01 to 2026-10-27 |
+| `production_failures.parquet` | one failure | 2,873     | 825   | 2021-12-14 to 2026-10-26 |
 
 Join key: `uwi`. Events are aggregated to well × day or well × month before joining to the daily table, so rows are not repeated.
 
@@ -84,8 +85,6 @@ notebooks/        Databricks notebooks, run in order
 src/              shared cleaning and feature functions
 dashboard/        AI/BI dashboard: Reliability Investment Dashboard.lvdash.json + build_dashboard.py (tests every query)
 docs/             slides (PDF), figures, known issues
-decision/         team planning pages (research question vote, build plan)
-.claude/skills/   reference notes used with Claude Code (dataset, domain, rubric)
 ```
 
 ## How to reproduce
@@ -142,48 +141,51 @@ We lead with transparent rules and kept machine learning to one time-boxed chall
 
 **Alert tiers (n6).** We split the combined alert stream by which rule fired on the alert day:
 
-| Tier | Alerts | Precision | Failures caught (of 1,410) |
-|---|---|---|---|
-| 1 · both rules | 273 | **34.1%** | 105 |
-| 2 · watchlist only | 2,064 | 28.1% | 442 |
-| 3 · runtime rule only | 2,914 | 12.9% | 403 |
+| Tier                  | Alerts | Precision | Failures caught (of 1,410) |
+| --------------------- | ------ | --------- | -------------------------- |
+| 1 · both rules        | 273    | **34.1%** | 105                        |
+| 2 · watchlist only    | 2,064  | 28.1%     | 442                        |
+| 3 · runtime rule only | 2,914  | 12.9%     | 403                        |
 
 Crews should work tier 1 first, then tier 2. Tier 3 alerts are right about one time in eight, so they are only worth it where crews have spare capacity.
 
 **ML challenger (n7).** The model has one row per producing well every 14 days and is trained on Jun–Dec 2025 snapshots.
+
 - **Label:** a rod, pump or tubing stop 2–30 days after the snapshot.
 - **Features, all from before the snapshot:** recent failures, days since the last failure, last failure type, repair $, partial-run and down days, efficiency drift, area and pump make.
 - **Test:** Jan–Oct 2026 snapshots, with no tuning on 2026. We take as many top-scored snapshots as the rule flags on the same snapshots, so the workload is the same.
 
-| Same workload as | Method | Flagged | Precision | Failures caught (of 1,518) |
-|---|---|---|---|---|
-| Watchlist | Recency watchlist | 2,157 | 30.7% | 477 |
-| | Logistic regression | 2,157 | **36.8%** | 546 |
-| | Gradient-boosted trees | 2,157 | 34.4% | 549 |
-| Either rule | Either rule | 3,182 | 24.3% | 588 |
-| | Logistic regression | 3,182 | 31.2% | 679 |
-| | Gradient-boosted trees | 3,182 | 30.6% | **697** |
+| Same workload as | Method                 | Flagged | Precision | Failures caught (of 1,518) |
+| ---------------- | ---------------------- | ------- | --------- | -------------------------- |
+| Watchlist        | Recency watchlist      | 2,157   | 30.7%     | 477                        |
+|                  | Logistic regression    | 2,157   | **36.8%** | 546                        |
+|                  | Gradient-boosted trees | 2,157   | 34.4%     | 549                        |
+| Either rule      | Either rule            | 3,182   | 24.3%     | 588                        |
+|                  | Logistic regression    | 3,182   | 31.2%     | 679                        |
+|                  | Gradient-boosted trees | 3,182   | 30.6%     | **697**                    |
 
 At the same workload, the models catch 70–110 more failures than the rules (4–7 points more precision). That beats the rules, but only modestly. The logistic regression's largest weights are operating area (Winter higher, Fenn Big Valley lower), down days in the last 30 days (which lower the score) and repair $. So part of the gain is learning each area's base rate, which a rule could also use. It is one time split with no tuning. We keep the rules as the recommendation for now and treat the model as the next step to pilot once more failure history exists. We would adopt it only if it holds this edge without more alerts.
 
 ## Implementation plan (30/60/90 days)
 
-**Value at stake.** Rod Truck and Workover spend on eligible wells was C$47.0M from Jun 2025 to Oct 2026 (about C$33M a year), plus C$8.4M of downhole lost oil at C$32.50/boe. Today's watchlist, the 114 wells with 2+ failures in the last 90 days, holds 24.9% of the last 12 months' repair spend on wells with a logged failure. *Sourced from field estimates in `well_jobs`; not invoices.*
+**Value at stake.** Rod Truck and Workover spend on eligible wells was C$47.0M from Jun 2025 to Oct 2026 (about C$33M a year), plus C$8.4M of downhole lost oil at C$32.50/boe. Today's watchlist, the 114 wells with 2+ failures in the last 90 days, holds 24.9% of the last 12 months' repair spend on wells with a logged failure. _Sourced from field estimates in `well_jobs`; not invoices._
 
 **Pilot areas: Cactus Lake and Winter.** Together they have 62% of failures since Jun 2025 (945 and 826 of 2,841), which gives the pilot enough events to measure in 90 days.
+
 - **Cactus Lake is where the money is.** It accounts for about 42% of Rod Truck and Workover dollars, and 44% of its jobs are workovers.
 - **Winter is where failures repeat.** 81.5% of its failures are followed by another on the same well within 90 days, against 57% overall. Most of its jobs are cheaper rod truck jobs.
 
-| Days | What happens | Owner (proposed) |
-|---|---|---|
-| 0–30 | A weekly reliability review in each pilot area, driven by the dashboard work list: recency first, then 12-month cost. Each well on the list gets a root-cause note. | Area production engineer leads; the data owner refreshes the tables weekly |
+| Days  | What happens                                                                                                                                                                                                                                                                                                                          | Owner (proposed)                                                                                |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| 0–30  | A weekly reliability review in each pilot area, driven by the dashboard work list: recency first, then 12-month cost. Each well on the list gets a root-cause note.                                                                                                                                                                   | Area production engineer leads; the data owner refreshes the tables weekly                      |
 | 31–60 | Pick a budget scenario. The top 25 wells cost C$0.85M and pay back in 2.3 years at 25% fewer failures, or 1.1 years at 50%. Run a root-cause review on every well with a second failure within 90 days. For Cactus Lake, also trial slower pump speeds on fast wells (rods fail 0.55/well-year below 150 RPM vs 1.50 at 250–349 RPM). | Operations superintendent approves the budget; rig and rod-truck coordinators schedule the work |
-| 61–90 | Measure the KPIs against the 0–30 day baseline. Add the runtime alert rule only in areas whose crews can handle about 9 alerts per area per week. Expand area by area. | Reliability lead |
+| 61–90 | Measure the KPIs against the 0–30 day baseline. Add the runtime alert rule only in areas whose crews can handle about 9 alerts per area per week. Expand area by area.                                                                                                                                                                | Reliability lead                                                                                |
 
 **Resources.**
-- **Money:** the action cost of C$34,152 per well is *assumed* (the 2023+ Workover median), and the 25%/50% failure reduction is *assumed* (it brackets one vendor case of about 34%). The netback (C$32.50/boe, Strathcona Q3 2026 operating earnings) and the repair costs are *sourced*.
-- **Manpower** *(our estimate, to confirm with operations)*: the weekly review needs about 1 hour from the area engineer and a foreman. The data owner reruns the notebooks weekly.
-- **Logistics** *(proposal)*: do each action when the rig or rod truck is already on the well for its next repair, so most actions need no extra mobilization. Rod Truck and Workover jobs run about 5% lower in Apr–May (2023–2025 average), which leaves room to schedule pilot work then.
+
+- **Money:** the action cost of C$34,152 per well is _assumed_ (the 2023+ Workover median), and the 25%/50% failure reduction is _assumed_ (it brackets one vendor case of about 34%). The netback (C$32.50/boe, Strathcona Q3 2026 operating earnings) and the repair costs are _sourced_.
+- **Manpower** _(our estimate, to confirm with operations)_: the weekly review needs about 1 hour from the area engineer and a foreman. The data owner reruns the notebooks weekly.
+- **Logistics** _(proposal)_: do each action when the rig or rod truck is already on the well for its next repair, so most actions need no extra mobilization. Rod Truck and Workover jobs run about 5% lower in Apr–May (2023–2025 average), which leaves room to schedule pilot work then.
 - **Time:** savings start with the first avoided failure. Most repeat failures come back within about six weeks, so a change should show in the 90-day re-failure rate within one quarter.
 
 **KPIs.** 90-day re-failure rate, failures per well-year, repair $ per well-year, downhole lost oil (m³), and alerts per area per week.
@@ -194,18 +196,18 @@ At the same workload, the models catch 70–110 more failures than the rules (4�
 
 Each limitation says how it moves the results. "Conservative" means the true benefit is probably larger than reported.
 
-| Limitation | Effect on results |
-|---|---|
-| The failure log starts in Jun 2025, so bad actors are picked on 7 months and measured on 10. | Wide intervals on rates and payback. Measuring on the months used to pick would **overstate** the rates (rods 6.99/yr while picking vs 4.05/yr after), so we measure on later months. |
-| Rod Truck cost is missing before 2023, and earlier history uses repair jobs as a stand-in for failures. | The ranking starts in 2023. History-based ranking only modestly beats ranking by well size (top 10% catches 16.5% vs 15.9% of later cost). |
-| Repair cost is the field estimate (`field_est_total`); invoiced cost is empty. | Direction **unknown**. Payback scales with cost per failure: 20% higher real costs shorten payback by about a sixth. |
-| The netback is company-wide operating earnings (C$32.50/boe), not a heavy-oil netback. | Small effect. Netback ±25% moves Action 1's payback from 1.77 to between 1.65 and 1.90 years at 50% fewer failures. Repair dollars, not lost oil, drive the savings. |
-| `lost_oil_m3` is an operator estimate and is null on 67.5% of daily rows; nulls count as zero. | Lost-oil value is **understated**, so savings are understated and payback is **conservative**. |
-| Downtime codes are only partly mapped to causes; unmapped codes fall in "Other". | Downhole lost oil per failure is likely **understated** (conservative), and the cause split on page 1 is approximate. |
-| `failure_start_date` is logged a median 2 days after the well stops. | Handled by anchoring on the stop day. Any stops we miss would **understate** lost oil per failure (conservative). |
-| Action cost (C$34,152) and its effect (25% or 50% fewer failures) are assumptions, not measured. | Payback is proportional to both: half the action cost halves payback (1.77 → 0.88 years for Action 1 at 50%). We report the range, not one number. |
-| Equipment and RPM comparisons are observational. | Harder wells may get particular pumps or run faster, so switching equipment may deliver **less** than the gap suggests. Reported as associations. |
-| Torque, current and RPM repeat day to day, and torque covers 6% of Cactus Lake failures. | The early warning uses runtime only, so its recall (43.6%) is a **lower bound** on what daily sensor readings could give. |
+| Limitation                                                                                              | Effect on results                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The failure log starts in Jun 2025, so bad actors are picked on 7 months and measured on 10.            | Wide intervals on rates and payback. Measuring on the months used to pick would **overstate** the rates (rods 6.99/yr while picking vs 4.05/yr after), so we measure on later months. |
+| Rod Truck cost is missing before 2023, and earlier history uses repair jobs as a stand-in for failures. | The ranking starts in 2023. History-based ranking only modestly beats ranking by well size (top 10% catches 16.5% vs 15.9% of later cost).                                            |
+| Repair cost is the field estimate (`field_est_total`); invoiced cost is empty.                          | Direction **unknown**. Payback scales with cost per failure: 20% higher real costs shorten payback by about a sixth.                                                                  |
+| The netback is company-wide operating earnings (C$32.50/boe), not a heavy-oil netback.                  | Small effect. Netback ±25% moves Action 1's payback from 1.77 to between 1.65 and 1.90 years at 50% fewer failures. Repair dollars, not lost oil, drive the savings.                  |
+| `lost_oil_m3` is an operator estimate and is null on 67.5% of daily rows; nulls count as zero.          | Lost-oil value is **understated**, so savings are understated and payback is **conservative**.                                                                                        |
+| Downtime codes are only partly mapped to causes; unmapped codes fall in "Other".                        | Downhole lost oil per failure is likely **understated** (conservative), and the cause split on page 1 is approximate.                                                                 |
+| `failure_start_date` is logged a median 2 days after the well stops.                                    | Handled by anchoring on the stop day. Any stops we miss would **understate** lost oil per failure (conservative).                                                                     |
+| Action cost (C$34,152) and its effect (25% or 50% fewer failures) are assumptions, not measured.        | Payback is proportional to both: half the action cost halves payback (1.77 → 0.88 years for Action 1 at 50%). We report the range, not one number.                                    |
+| Equipment and RPM comparisons are observational.                                                        | Harder wells may get particular pumps or run faster, so switching equipment may deliver **less** than the gap suggests. Reported as associations.                                     |
+| Torque, current and RPM repeat day to day, and torque covers 6% of Cactus Lake failures.                | The early warning uses runtime only, so its recall (43.6%) is a **lower bound** on what daily sensor readings could give.                                                             |
 
 ## External resources
 
@@ -219,8 +221,8 @@ Each limitation says how it moves the results. "Conservative" means the true ben
 
 ## Links
 
-- Video (5 min): *pending*
-- Slides: *pending*
+- Video (5 min): _pending_
+- Slides: _pending_
 - Dashboard screenshots (Databricks AI/BI dashboard, "Reliability Investment Dashboard"):
   - [Cost Drivers](dashboard/Cost%20Drivers.png): where repair dollars and lost oil go
   - [Recurrence Analysis](dashboard/Recurrence%20Analysis.png): how often failures come back
