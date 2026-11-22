@@ -50,11 +50,13 @@ Screen recording, light mode. About 20 seconds per tab.
 >
 > *Validation and Data Quality.* Every result was set on past data and tested on 2026: the ranking, the alert rules, and the model challenger. At the bottom, the cleaning log, and proof that cleaning doesn't change which wells come out on top.
 
-## 4:00 · Slides 15–17 · Recommendation and 90-day pilot (Angie, 45 s)
+## 4:00 · Slides 15–16 · What we recommend (Angie, 15 s)
 
-> We recommend three things. Work the watchlist every week, recent failures first. Fund the top 25 bad actors for 850 thousand dollars. And pilot the model alongside the rules.
->
-> Start in Cactus Lake, where the money is, and Winter, where failures repeat most; together they hold 62 percent of failures. In the first 30 days, run weekly reviews. By day 60, pick a budget. By day 90, measure the 90-day re-failure rate against the baseline, then scale area by area.
+> We recommend three things: work the watchlist every week, fund the top 25 bad actors for 850 thousand dollars, and pilot the model alongside the rules.
+
+## 4:15 · Slide 17 · 90-day pilot (Angie, 30 s)
+
+> Here's how we'd start. Cactus Lake, where the money is, and Winter, where failures repeat most, together hold 62 percent of failures. In the first 30 days, run weekly reviews. By day 60, pick a budget. By day 90, measure the 90-day re-failure rate against the baseline, then scale area by area.
 
 ## 4:45 · Slide 18 · Conclusion (Angie, 15 s)
 
@@ -70,6 +72,7 @@ Use the same deck. Keep every line above, and add these at a slower pace (about 
 - **Payback, slide 12:** the sensitivity. Netback ±25% moves payback by only about 0.1 years. Halving the action cost halves payback. Also the Cactus Lake pump-speed finding (0.55 vs 1.50 rod failures per well-year), presented as an association.
 - **Early warning, slide 13, plus appendix A5:** the three alert tiers, and the model's features and time split. The model's largest weights are operating area, which a rule could also use.
 - **Dashboard:** spend longer on Return on Action (budget scenarios and the well list) and on the Validation & Data Quality tab.
+- **Business model canvas, appendix A7 (about 30 s, right after slide 17):** how this runs as an ongoing program. Point at three boxes only: who uses it (customer segments), what it costs (cost structure) and what it saves (revenue streams).
 - **Implementation, appendix A2:** money (action cost assumed, netback sourced), manpower, logistics (act when the rig is already on the well) and time (impact shows within a quarter).
 - **Risks, appendix A3:** walk through the top three: smaller action effect, cost estimates vs invoices, and alert fatigue, each with its mitigation.
 - **Limitations, appendix A4:** each one says which way it moves the result. Most make the payback conservative.
