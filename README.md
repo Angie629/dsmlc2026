@@ -1,14 +1,14 @@
 # Bad Actors: Targeting Repeat-Failure Wells
 
-_Working title._ Strathcona Resources × Chirality Research Datathon, November 2026. Theme: Optimization.
+DSMLC Datathon 2026: Strathcona Resources × Chirality Research, November 2026. Theme: Optimization.
 
 **Solution form:** (3) Implementation / recommendation plan, backed by a Databricks AI/BI dashboard.
 
 ## Team
 
-- Angie
-- Jacob
-- Ananya
+- Ananya Jain
+- Angie Shin
+- Jacob McCarthy
 
 ## Research question
 
@@ -19,21 +19,21 @@ Supporting questions:
 1. Does a ranking built on past repair cost and lost oil identify the wells that are costly in a later period, better than random selection and better than ranking by well size?
 2. Which equipment and operating factors are associated with higher failure rates on those wells?
 3. Which interventions break even, and at what failure-reduction rate?
-4. Can simple threshold rules on rod torque, motor current and pump efficiency flag failures before they happen?
+4. Can simple threshold rules on pump runtime and efficiency flag failures before they happen, and does a machine-learning model do better at the same workload? (Rod torque and motor current turned out to repeat day to day, so they could not be used.)
 
 ## Motivation
 
 Every producing heavy oil well here is lifted by a progressing cavity pump (PCP) driven through a rod string, and rods are the most common failure. Each failure costs a repair job plus the oil not produced while the well is down.
 
-Profiling of the competition data (Nov 20, 2026) shows the cost is concentrated in a small set of wells:
+Profiling of the raw competition data (Nov 20, 2026) shows the cost is concentrated in a small set of wells. The dollar figures in the rest of this README use the cleaned tables and eligible producing wells, so they are lower than the raw totals here.
 
 | Measure                                                                    | Value                                              |
 | -------------------------------------------------------------------------- | -------------------------------------------------- |
-| Rod Truck + Workover repair spend since Jun 2025 (field estimates)         | $64.1M over 975 wells, about $46M a year           |
+| Rod Truck + Workover repair spend since Jun 2025 (raw field estimates)     | $64.1M over 975 wells                              |
 | Repair $ held by the top 10% / top 20% of those wells                      | 33% / 50%                                          |
 | Failures followed by another on the same well within 90 days (Jun 2025 on) | 57% (rods 65%, pump and tubing about 30%)          |
 | Failures from wells with 3 or more failures                                | 79%                                                |
-| Lost oil on downhole downtime codes                                        | 213,499 m³ (3 codes only; full bucket map pending) |
+| Downhole lost oil, 2021–26 (full downtime-bucket map, `01d_daily_checks`)  | 219,627 m³                                         |
 
 Rod failures are chronic, not one-off. A short, regularly refreshed list of repeat-failure wells lets reliability engineers and field crews focus where the money is.
 
@@ -71,27 +71,31 @@ Data limits that shape the method:
 ## Repository structure
 
 ```
-notebooks/        Databricks notebooks, run in order
+notebooks/        Databricks notebooks, run in order (04b is plain Python)
   01a_clean_daily    bronze → silver_daily, cleaning log
   01b_clean_jobs_failures  bronze → silver_jobs, silver_failures (failures linked to repair jobs)
   01c_downtime_features    downtime buckets, silver_downtime, rolling pump-sensor features (needs silver_daily)
   01d_daily_checks   lost oil by bucket, power-downtime seasonality, downtime per failure from the stop day (gold_failure_downtime)
   02a_ranking        gold_well_month, gold_well_period, cost score and ranks; out-of-time validation (gold_ranking_validation)
   03a_repeat_failures  re-failure@30/90, Rod Truck repeat rate by year, recency tiers (gold_failure_gap, gold_recency_tier)
-  03b_runlife_payback  failure rates by pump make, model and RPM within area (gold_failure_rates); payback added next
+  03b_runlife_payback  failure rates by pump make, model and RPM within area (gold_failure_rates); cost per failure and payback for 2 actions (gold_payback)
+  03c_budget_scenarios  bad-actor wells ranked with Gamma–Poisson shrinkage; 25/50/100/200-well budget scenarios (gold_budget_wells, gold_budget_scenarios)
   04a_early_warning  sensors before failures, threshold grid, holdout evaluation and gold alert outputs
   04b_ml_challenger  alert tiers (n6) and a time-boxed ML challenger (n7); plain Python on the Parquet files, writes docs/figures/n6_*.csv, n7_*.csv
   (05 reserved for weather: not used, power downtime is not seasonal)
-src/              shared cleaning and feature functions
-dashboard/        AI/BI dashboard: Reliability Investment Dashboard.lvdash.json + build_dashboard.py (tests every query)
-docs/             slides (PDF), figures, known issues
+dashboard/        AI/BI dashboard: Reliability Investment Dashboard.lvdash.json, build_dashboard.py (rebuilds it and tests every query), page screenshots
+docs/             slides (.pptx and PDF), presentation script, figures, team docs
+decision/         team planning pages (research question vote, build plan)
+.claude/skills/   reference notes for Claude Code (dataset, domain, rubric) and sync-dashboard (copies dashboard-editor changes into build_dashboard.py)
+AI_LOG.md         AI usage log (required disclosure)
 ```
 
 ## How to reproduce
 
 1. Upload the three Parquet files to a Unity Catalog volume in a Databricks workspace.
-2. Run the `notebooks/01a` to `01d` notebooks in letter order, then `02a_ranking` to `04a_early_warning`, in order on serverless compute.
-3. Import `dashboard/Reliability Investment Dashboard.lvdash.json` (Dashboards → Create → Import from file), or regenerate it with `python dashboard/build_dashboard.py build`.
+2. Run the `notebooks/01a` to `01d` notebooks in letter order, then `02a_ranking` through `04a_early_warning` in order, on serverless compute.
+3. Optional, runs on a laptop: put the Parquet files in `dataset/` and run `python notebooks/04b_ml_challenger.py` (pandas, scikit-learn) for the alert tiers and the ML challenger.
+4. Import `dashboard/Reliability Investment Dashboard.lvdash.json` (Dashboards → Create → Import from file), or rebuild it with `python dashboard/build_dashboard.py build` (`test` runs every dataset query on the SQL warehouse first).
 
 Credentials are never stored in the notebooks or this repo. Use Databricks secrets or environment variables.
 
@@ -103,6 +107,7 @@ Team docs:
 - [Notebooks and data flow](docs/notebooks_and_data_flow.md): naming conventions, data-flow diagram, and every Databricks table with its grain, writer and users
 - [Checkpoint c2 sign-off](docs/c2_signoff.md): score definition, the 2 actions and the early-warning choice, with evidence
 - [Build plan](docs/build_plan.md): tasks, owners, definitions and sourced inputs (snapshot of the team's live plan page)
+- [Presentation script](docs/presentation_script.md): 5-minute video script with the dashboard demo, plus notes for a 10-minute finals version
 
 ## Methods
 
@@ -125,9 +130,9 @@ cost_score = repair_$ + downhole_lost_oil_m3 × 6.2898 × netback_per_bbl
 
 **Equipment comparison.** Failures per producing well-year by pump make and model, compared within operating areas, with Poisson 95% intervals and a minimum group size.
 
-**Payback.** Cost per failure (linked repair job + downhole lost oil from the day the well stopped to 14 days after the logged failure date) against the annualized cost of an action, giving a break-even number of failures avoided per well-year, with a sensitivity grid.
+**Payback.** Cost per failure (linked repair job + downhole lost oil from the day the well stopped to 14 days after the logged failure date) against the cost of an action, giving a break-even number of failures avoided per well-year, with a sensitivity grid. Bad actors are picked on Jun–Dec 2025 failures and their rate is measured on Jan–Oct 2026, so picking does not inflate the rate. Budget scenarios rank wells by expected savings, shrinking each well's failure rate toward its area rate (Gamma–Poisson empirical Bayes).
 
-**Early warning.** Rules on runtime instability (partial-run and fully down days in the last week) and on 7-day vs baseline drops in pump efficiency and fluid rate. Torque and current are not used because their values repeat day to day. An alert counts as a hit if the well stops for a failure 2–30 days later. The baseline to beat is a recency watchlist: wells with 2+ failures in the last 90 days.
+**Early warning.** Candidate rules on runtime instability (partial-run and fully down days in the last week) and on drops in pump efficiency, run only on producing days. The rule chosen on 2025 is 2+ partial-run days in a week; down-day and efficiency rules did not add precision. Torque and current are not used because their values repeat day to day. An alert counts as a hit if the well stops for a rod, pump or tubing failure 2–30 days later, with one alert per well per 14 days. The baseline to beat is a recency watchlist: wells with 2+ failures in the last 90 days.
 
 ## Validation
 
@@ -203,7 +208,7 @@ Each limitation says how it moves the results. "Conservative" means the true ben
 | Repair cost is the field estimate (`field_est_total`); invoiced cost is empty.                          | Direction **unknown**. Payback scales with cost per failure: 20% higher real costs shorten payback by about a sixth.                                                                  |
 | The netback is company-wide operating earnings (C$32.50/boe), not a heavy-oil netback.                  | Small effect. Netback ±25% moves Action 1's payback from 1.77 to between 1.65 and 1.90 years at 50% fewer failures. Repair dollars, not lost oil, drive the savings.                  |
 | `lost_oil_m3` is an operator estimate and is null on 67.5% of daily rows; nulls count as zero.          | Lost-oil value is **understated**, so savings are understated and payback is **conservative**.                                                                                        |
-| Downtime codes are only partly mapped to causes; unmapped codes fall in "Other".                        | Downhole lost oil per failure is likely **understated** (conservative), and the cause split on page 1 is approximate.                                                                 |
+| Downtime codes are only partly mapped to causes; unmapped codes fall in "Other".                        | Downhole lost oil per failure is likely **understated** (conservative), and the cause split on the Cost Drivers tab is approximate.                                                                 |
 | `failure_start_date` is logged a median 2 days after the well stops.                                    | Handled by anchoring on the stop day. Any stops we miss would **understate** lost oil per failure (conservative).                                                                     |
 | Action cost (C$34,152) and its effect (25% or 50% fewer failures) are assumptions, not measured.        | Payback is proportional to both: half the action cost halves payback (1.77 → 0.88 years for Action 1 at 50%). We report the range, not one number.                                    |
 | Equipment and RPM comparisons are observational.                                                        | Harder wells may get particular pumps or run faster, so switching equipment may deliver **less** than the gap suggests. Reported as associations.                                     |
@@ -222,7 +227,9 @@ Each limitation says how it moves the results. "Conservative" means the true ben
 ## Links
 
 - Video (5 min): _pending_
-- Slides: _pending_
+- Slides: [Bad Actors - DSMLC Datathon 2026.pdf](docs/Bad%20Actors%20-%20DSMLC%20Datathon%202026.pdf) ([.pptx](docs/Bad%20Actors%20-%20DSMLC%20Datathon%202026.pptx), with speaker notes)
+- Script: [docs/presentation_script.md](docs/presentation_script.md)
+- AI usage log: [AI_LOG.md](AI_LOG.md)
 - Dashboard screenshots (Databricks AI/BI dashboard, "Reliability Investment Dashboard"):
   - [Cost Drivers](dashboard/Cost%20Drivers.png): where repair dollars and lost oil go
   - [Recurrence Analysis](dashboard/Recurrence%20Analysis.png): how often failures come back
