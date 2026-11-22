@@ -190,4 +190,10 @@ Each limitation says how it moves the results. "Conservative" means the true ben
 
 - Video (5 min): *pending*
 - Slides: *pending*
-- Dashboard screenshots: `dashboard/`
+- Dashboard screenshots (Databricks AI/BI dashboard, "Reliability Investment Dashboard"):
+  - [Cost Drivers](dashboard/Cost%20Drivers.png): where repair dollars and lost oil go
+  - [Recurrence Analysis](dashboard/Recurrence%20Analysis.png): how often failures come back
+  - [Work Order Priorities](dashboard/Work%20Order%20Priorities.png): this week's ranked work list and runtime alerts
+  - [Return on Action – Budget](dashboard/Return%20on%20Action%20-%20Budget.png): payback sensitivity and budget scenarios
+  - [Model Validation](dashboard/Model%20Validation.png): out-of-time ranking test and early-warning results
+  - [Data Quality](dashboard/Data%20Quality.png): cleaning rules and what the data cannot tell us
