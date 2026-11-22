@@ -1,0 +1,7 @@
+rule,alerts,hits,precision_pct,failures_caught,label_failures,recall_pct,alerts_per_area_week
+Recency watchlist (2+ in 90 days),2475,714,28.8,500,1410,35.5,3.6
+Runtime rule (2+ partial-run days in 7),3550,603,17.0,625,1410,44.3,5.16
+Either rule,5950,1288,21.6,813,1410,57.7,8.65
+Tier 1: both rules on the alert day,273,93,34.1,105,1410,7.4,0.4
+Tier 2: watchlist only,2064,580,28.1,442,1410,31.3,3.0
+Tier 3: runtime rule only,2914,376,12.9,403,1410,28.6,4.24

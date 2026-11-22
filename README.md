@@ -79,6 +79,7 @@ notebooks/        Databricks notebooks, run in order
   03a_repeat_failures  re-failure@30/90, Rod Truck repeat rate by year, recency tiers (gold_failure_gap, gold_recency_tier)
   03b_runlife_payback  failure rates by pump make, model and RPM within area (gold_failure_rates); payback added next
   04a_early_warning  sensors before failures, threshold grid, holdout evaluation and gold alert outputs
+  04b_ml_challenger  alert tiers (n6) and a time-boxed ML challenger (n7); plain Python on the Parquet files, writes docs/figures/n6_*.csv, n7_*.csv
   (05 reserved for weather: not used, power downtime is not seasonal)
 src/              shared cleaning and feature functions
 dashboard/        AI/BI dashboard: Reliability Investment Dashboard.lvdash.json + build_dashboard.py (tests every query)
@@ -134,6 +135,36 @@ cost_score = repair_$ + downhole_lost_oil_m3 × 6.2898 × netback_per_bbl
 - **Ranking:** out of time. Rank on 2023–2024, measure the share of June 2025 – October 2026 cost captured by the top 5/10/20% of wells. Compare with random selection, with ranking by oil volume, and with a recency watchlist (2+ failures in the last 90 days). 95% intervals by bootstrap over wells.
 - **Early warning:** thresholds on runtime instability and efficiency, chosen on June–December 2025 failures (aligned to the stop day) and frozen before testing on January–October 2026. Precision, recall, median lead time and alerts per area per week, compared with the recency watchlist and with random alerts at the same rate.
 - **Payback:** sensitivity to netback, action cost and failure-reduction rate. Equipment effects are observational and reported as associations.
+
+### Alert tiers and an ML challenger (2026 holdout)
+
+We lead with transparent rules and kept machine learning to one time-boxed challenger, scored at the same workload as the rules. Both checks run in `notebooks/04b_ml_challenger.py` on the Parquet files (the Databricks warehouse was over its daily limit). The local rebuild reproduces the Databricks test exactly on alerts, precision and failures caught: watchlist 28.8%, runtime rule 17.0%, either rule 21.6%; 500, 625 and 813 failures caught.
+
+**Alert tiers (n6).** We split the combined alert stream by which rule fired on the alert day:
+
+| Tier | Alerts | Precision | Failures caught (of 1,410) |
+|---|---|---|---|
+| 1 · both rules | 273 | **34.1%** | 105 |
+| 2 · watchlist only | 2,064 | 28.1% | 442 |
+| 3 · runtime rule only | 2,914 | 12.9% | 403 |
+
+Crews should work tier 1 first, then tier 2. Tier 3 alerts are right about one time in eight, so they are only worth it where crews have spare capacity.
+
+**ML challenger (n7).** The model has one row per producing well every 14 days and is trained on Jun–Dec 2025 snapshots.
+- **Label:** a rod, pump or tubing stop 2–30 days after the snapshot.
+- **Features, all from before the snapshot:** recent failures, days since the last failure, last failure type, repair $, partial-run and down days, efficiency drift, area and pump make.
+- **Test:** Jan–Oct 2026 snapshots, with no tuning on 2026. We take as many top-scored snapshots as the rule flags on the same snapshots, so the workload is the same.
+
+| Same workload as | Method | Flagged | Precision | Failures caught (of 1,518) |
+|---|---|---|---|---|
+| Watchlist | Recency watchlist | 2,157 | 30.7% | 477 |
+| | Logistic regression | 2,157 | **36.8%** | 546 |
+| | Gradient-boosted trees | 2,157 | 34.4% | 549 |
+| Either rule | Either rule | 3,182 | 24.3% | 588 |
+| | Logistic regression | 3,182 | 31.2% | 679 |
+| | Gradient-boosted trees | 3,182 | 30.6% | **697** |
+
+At the same workload, the models catch 70–110 more failures than the rules (4–7 points more precision). That beats the rules, but only modestly. The logistic regression's largest weights are operating area (Winter higher, Fenn Big Valley lower), down days in the last 30 days (which lower the score) and repair $. So part of the gain is learning each area's base rate, which a rule could also use. It is one time split with no tuning. We keep the rules as the recommendation for now and treat the model as the next step to pilot once more failure history exists. We would adopt it only if it holds this edge without more alerts.
 
 ## Implementation plan (30/60/90 days)
 
