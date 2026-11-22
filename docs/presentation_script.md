@@ -1,6 +1,6 @@
 # Presentation script: Bad Actors (5-minute video)
 
-Deck: `docs/Bad Actors - DSMLC Datathon 2026.pptx` (slides 1–18 are the talk; slides 19–26 are the appendix). The same lines are in each slide's speaker notes.
+Deck: `docs/Bad Actors - DSMLC Datathon 2026.pptx` (slides 1–18 are the talk; slides 19–27 are the appendix). The same lines are in each slide's speaker notes.
 
 Target: 5:00, about 3 minutes of slides and a 2-minute live dashboard demo (six tabs, about 20 seconds each). Times are cumulative. Speakers are a suggestion; swap freely.
 
@@ -34,7 +34,7 @@ For the demo, record a screen capture of the dashboard in Databricks, light mode
 
 > For early warning, the simple watchlist was right 29 percent of the time in 2026, better than a sensor rule. Together they catch 57 percent of failures. A simple machine-learning model does 3 to 7 points better at the same workload, so it's our next step.
 
-## 2:00 · Slide 14 · Dashboard demo (Angie, 2 min)
+## 2:00 · Slide 14 · Dashboard demo (Jacob, 2 min)
 
 Screen recording, light mode. About 20 seconds per tab.
 
@@ -50,7 +50,7 @@ Screen recording, light mode. About 20 seconds per tab.
 >
 > *Validation and Data Quality.* Every result was set on past data and tested on 2026: the ranking, the alert rules, and the model challenger. At the bottom, the cleaning log, and proof that cleaning doesn't change which wells come out on top.
 
-## 4:00 · Slides 15–17 · Recommendation and 90-day pilot (Jacob, 45 s)
+## 4:00 · Slides 15–17 · Recommendation and 90-day pilot (Angie, 45 s)
 
 > We recommend three things. Work the watchlist every week, recent failures first. Fund the top 25 bad actors for 850 thousand dollars. And pilot the model alongside the rules.
 >
