@@ -225,8 +225,8 @@ Each limitation says how it moves the results. "Conservative" means the true ben
 
 ## Links
 
-- Video (5 min): _pending_
-- Slides: [Bad Actors - DSMLC Datathon 2026.pdf](docs/Bad%20Actors%20-%20DSMLC%20Datathon%202026.pdf) ([.pptx](docs/Bad%20Actors%20-%20DSMLC%20Datathon%202026.pptx), with speaker notes)
+- 5-minute project summary video: [Google Drive](https://drive.google.com/file/d/14bfAo_ZX2ACkp-aLTRX4uevqV8wnodu_/view?usp=sharing)
+- Presentation slides: [Google Drive](https://drive.google.com/file/d/12yT-Dv0-XvuMdgJEM8Tx5yQf2_jJ9fFr/view?usp=sharing); copy in the repo: [Bad Actors - DSMLC Datathon 2026.pdf](docs/Bad%20Actors%20-%20DSMLC%20Datathon%202026.pdf) ([.pptx](docs/Bad%20Actors%20-%20DSMLC%20Datathon%202026.pptx), with speaker notes)
 - Script: [docs/presentation_script.md](docs/presentation_script.md)
 - AI usage log: [AI_LOG.md](AI_LOG.md)
 - Dashboard screenshots (Databricks AI/BI dashboard, "Reliability Investment Dashboard"):
