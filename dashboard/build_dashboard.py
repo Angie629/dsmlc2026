@@ -191,18 +191,24 @@ FROM a LEFT JOIN nm USING (uwi) LEFT JOIN t USING (uwi)
 ORDER BY alert_tier, alert_date DESC"""),
 
     "ds_p5_rules": ("Runtime rule vs recency watchlist, 2026 holdout", f"""
-SELECT rule_name,
+SELECT CASE rule_name WHEN 'Recency watchlist (2+ in 90 days)' THEN 'Watchlist'
+                      WHEN 'Runtime + efficiency rule' THEN 'Runtime rule'
+                      ELSE 'Either rule' END AS rule_name,
        ROUND(100 * precision, 1) AS precision_pct,
        ROUND(100 * recall, 1) AS recall_pct,
        alerts, alerts_per_area_week, median_lead_days, failures_caught, label_failures
 FROM {S}.gold_warning_eval WHERE window = '2026 holdout'"""),
 
-    "ds_p5_tiers": ("Alert tiers, 2026 holdout (notebooks/04b_ml_challenger)", f"""
-SELECT rule AS tier, alerts, precision_pct, failures_caught
+    "ds_p5_tiers": ("Flags by which rule raised them, 2026 (notebooks/04b_ml_challenger)", f"""
+SELECT CASE tier_order WHEN 1 THEN 'Both rules' WHEN 2 THEN 'Watchlist only' ELSE 'Runtime rule only' END AS tier,
+       alerts, precision_pct, failures_caught
 FROM {S}.gold_alert_tiers WHERE tier_order > 0 ORDER BY tier_order"""),
 
-    "ds_p5_challenger": ("Rules vs model at the same workload, 2026 (notebooks/04b_ml_challenger)", f"""
-SELECT workload, method, precision_pct, failures_caught FROM {S}.gold_model_eval"""),
+    "ds_p5_challenger": ("Watchlist vs two models with the same number of flags, 2026 (notebooks/04b_ml_challenger)", f"""
+SELECT CASE method WHEN 'Rule' THEN 'Watchlist rule' WHEN 'Logistic regression' THEN 'Model: logistic regression'
+                   ELSE 'Model: boosted trees' END AS method,
+       precision_pct, failures_caught
+FROM {S}.gold_model_eval WHERE workload LIKE 'Watchlist%'"""),
 
     "ds_p4_cost": ("Cost per failure by type", f"""
 WITH f AS (
@@ -256,16 +262,13 @@ FROM {S}.gold_ranking_validation
 WHERE ranker = 'Cost + recent' AND target = 'cost' AND k = 0.1"""),
 
     "ds_p5_curve": ("Share of later cost captured, by ranker", f"""
-SELECT CAST(ROUND(100 * k) AS INT) AS share_targeted_pct, ranker, ROUND(100 * capture, 1) AS share_captured_pct
-FROM {S}.gold_ranking_validation WHERE target = 'cost'"""),
-
-    "ds_p5_watch": ("Recency watchlist precision and recall", f"""
-WITH e AS (SELECT failures_prior_90, failed_next_90 FROM {S}.gold_recency_tier WHERE NOT is_current),
-f AS (SELECT explode(array(1, 2, 3)) AS k)
-SELECT CONCAT(k, '+ failures in last 90 days') AS flag,
-       ROUND(100 * AVG(CASE WHEN failures_prior_90 >= k THEN failed_next_90 END), 1) AS precision_pct,
-       ROUND(100 * SUM(CASE WHEN failures_prior_90 >= k AND failed_next_90 = 1 THEN 1 ELSE 0 END) / SUM(failed_next_90), 1) AS recall_pct
-FROM e CROSS JOIN f GROUP BY k"""),
+SELECT CAST(ROUND(100 * k) AS INT) AS share_targeted_pct,
+       CASE ranker WHEN 'Cost + recent' THEN 'Our ranking (cost + recent repairs)'
+                   WHEN 'Size (oil volume)' THEN 'Well size (oil volume)'
+                   ELSE 'Random picks' END AS ranker,
+       ROUND(100 * capture, 1) AS share_captured_pct
+FROM {S}.gold_ranking_validation
+WHERE target = 'cost' AND ranker IN ('Cost + recent', 'Size (oil volume)', 'Random')"""),
 
     "ds_p6_clean": ("Cleaning rules and rows changed (latest run)", f"""
 WITH l AS (SELECT *, MAX(run_at) OVER (PARTITION BY target) AS last_run FROM {S}.cleaning_log),
@@ -464,6 +467,8 @@ CENTER = {"contentAlignment": "center"}
 
 def build():
     # Every Overview widget reads ds_ov_wells, so clicking a well on the map cross-filters the rest of the page.
+    # Tooltips show the query field name, so the map's fields carry presentation labels.
+    TIP_UWI, TIP_WELL, TIP_COST = "UWI (well ID)", "Well name", "Cost of failures, last 12 months (C$, repairs + lost oil)"
     tier_colors = [{"value": "No recent failure", "color": "#D1D5DB"}, {"value": "1 failure", "color": "#FDBA74"},
                    {"value": "2 failures", "color": "#EA580C"}, {"value": "3+ failures", "color": "#9A3412"}]
     p0 = [
@@ -475,12 +480,13 @@ def build():
         ui(counter("p0-lost", "ds_ov_wells", "lost_oil_value_12m", "Downhole lost-oil value, last 12 months (C$)", 9, 1, "SUM", w=3),
            {"encodings": {"value": {"format": USD_COMPACT}}}),
         widget("p0-map", "ds_ov_wells",
-               [field("recency_tier"), field("latitude"), field("longitude"), field("uwi"), field("well_name"), field("cost_12m")],
+               [field("recency_tier"), field("latitude"), field("longitude"),
+                field(TIP_UWI, "`uwi`"), field(TIP_WELL, "`well_name`"), field(TIP_COST, "`cost_12m`")],
                {"version": 2, "widgetType": "symbol-map",
                 "encodings": {"coordinates": {"latitude": {"fieldName": "latitude"}, "longitude": {"fieldName": "longitude"}},
                               "color": {"fieldName": "recency_tier", "displayName": "Failures in the last 90 days",
                                         "scale": {"type": "categorical", "mappings": tier_colors}},
-                              "extra": [{"fieldName": "uwi"}, {"fieldName": "well_name"}, {"fieldName": "cost_12m"}]},
+                              "extra": [{"fieldName": TIP_UWI}, {"fieldName": TIP_WELL}, {"fieldName": TIP_COST}]},
                 "frame": {"showTitle": True, "title": "Where the wells are: grey = no recent failure, darker orange = more failures in 90 days"},
                 "data": {"queryName": "main_query"}},
                0, 3, 8, 8),
@@ -665,52 +671,56 @@ def build():
                0, 23, GRID, 7, disaggregated=False),
     ]
 
-    precision_recall = {"scale": {"type": "quantitative"}, "fields": [
-        {"fieldName": "precision_pct", "displayName": "Precision (%)"},
-        {"fieldName": "recall_pct", "displayName": "Recall (%)"}]}
+    right_caught = {"scale": {"type": "quantitative"}, "fields": [
+        {"fieldName": "precision_pct", "displayName": "Flags that were correct (%)"},
+        {"fieldName": "recall_pct", "displayName": "Breakdowns caught (%)"}]}
     p5 = [
-        subtitle("p5", "Wells are ranked on 2023-24 history plus Mar-May 2025 repairs and tested on Jun 2025 to Oct 2026 cost. A sensor rule only counts if it beats the simple recency watchlist."),
-        counter("p5-capture", "ds_p5_kpi", "capture_10_pct", "Later cost caught by the top 10% of wells (%, 95% CI 14.3-19.9)", 0, 1),
-        counter("p5-lift", "ds_p5_kpi", "lift_vs_random", "Lift vs random", 4, 1),
-        counter("p5-persist", "ds_p5_kpi", "persistence_pct", "Top-10% wells still top 10% later (%)", 8, 1),
-        bar("p5-curve", "ds_p5_curve", qty("share_targeted_pct", "Share of wells targeted (%)"), qty("share_captured_pct", "Share of later cost captured (%)"),
-            "Ranking with recent repairs edges out size; neither clearly wins", 0, 3, 8, 6, color=cat("ranker", "Ranking"), kind="line",
-            fields=[field("share_targeted_pct"), field("ranker"), field("share_captured_pct")]),
-        ui(bar("p5-watch", "ds_p5_watch", cat("flag", "Watchlist rule"), dict(precision_recall),
-               "Recency watchlist: the baseline sensor rules must beat", 8, 3, 4, 6, group=True,
-               fields=[field("flag"), field("precision_pct"), field("recall_pct")]),
-           {"encodings": {"x": {"scale": {"sort": {"by": "y-reversed"}}, "axis": {"labelAngle": 0}}, "y": NO_AXIS_TITLE},
-            "mark": {"colors": [None, theme(10)]}}),
-        ui(bar("p5-rules", "ds_p5_rules", cat("rule_name", "Rule"), dict(precision_recall),
-               "The runtime rule does not beat the watchlist on precision, but adds recall (2026)", 0, 9, 6, 6, group=True,
+        subtitle("p5", "We built every method on older data, then tested it on 2026 data it had never seen. That is the fair way to know whether it would have worked."),
+        text("p5-h1", "### Ranking wells by past cost\nWe ranked wells using data from before June 2025, then checked how much repair cost each well actually had from June 2025 to October 2026. Our top 10% of wells had 16.5% of that cost, better than picking wells at random (10%). But ranking by oil volume did almost as well (15.9%), so past cost alone is not enough. That is why the work list puts recent failures first.",
+             0, 1, GRID, 2),
+        counter("p5-capture", "ds_p5_kpi", "capture_10_pct", "Share of later repair cost from our top 10% of wells (%)", 0, 3, w=6),
+        counter("p5-lift", "ds_p5_kpi", "lift_vs_random", "Times better than picking wells at random", 6, 3, w=6),
+        ui(bar("p5-curve", "ds_p5_curve", qty("share_targeted_pct", "Wells picked (% of all wells)"), qty("share_captured_pct", "Share of later repair cost (%)"),
+               "Picking the top wells three ways: our ranking, oil volume, and at random", 0, 5, GRID, 6,
+               color=cat("ranker", "Picked by"), kind="line",
+               fields=[field("share_targeted_pct"), field("ranker"), field("share_captured_pct")]),
+           {"encodings": {"color": {**LEGEND_BOTTOM, "scale": {"mappings": [
+               {"color": "#EA580C", "value": "Our ranking (cost + recent repairs)"},
+               {"color": "#6B7280", "value": "Well size (oil volume)"},
+               {"color": "#D1D5DB", "value": "Random picks"}]}}}}, boxed_title=False),
+        text("p5-h2", "### Warning before a well breaks down\nWe use two simple rules to flag wells. The **watchlist** flags a well that has failed 2 or more times in the last 90 days. The **runtime rule** flags a well that ran only part of the day on 2 or more days in the past week. A flag counts as correct if the well breaks down (rod, pump or tubing) 2 to 30 days later.",
+             0, 11, GRID, 2),
+        ui(bar("p5-rules", "ds_p5_rules", cat("rule_name", "Rule"), dict(right_caught),
+               "How each rule did in 2026", 0, 13, 6, 6, group=True,
                fields=[field("rule_name"), field("precision_pct"), field("recall_pct")]),
-           {"encodings": {"x": {"axis": {"labelAngle": 0, "hideTitle": True}}, "y": {"axis": {"hideLabels": False, "hideTitle": True}},
-                          "label": {"show": False}},
-            "mark": {"colors": [None, theme(10)]}}),
-        ui(bar("p5-tiers", "ds_p5_tiers", cat("tier", "Alert tier"), qty("precision_pct", "Right (%)"),
-               "Alert tiers in 2026: work the top tier first (% of alerts followed by a failure)", 6, 9, 6, 6,
+           {"encodings": {"x": {"axis": {"labelAngle": 0, "hideTitle": True}}, "y": {"axis": {"hideTitle": True}}, "label": {"show": True}},
+            "mark": {"colors": [theme(8), theme(1)]}}),
+        ui(bar("p5-tiers", "ds_p5_tiers", cat("tier", "Flag raised by"), qty("precision_pct", "Flags that were correct (%)"),
+               "Which flags to check first: when both rules flag a well, it is right 1 time in 3", 6, 13, 6, 6,
                color={"fieldName": "tier", "scale": {"type": "categorical", "mappings": [
-                   {"color": "#9A3412", "value": "1 · Both rules"}, {"color": "#EA580C", "value": "2 · Watchlist only"},
-                   {"color": "#FDBA74", "value": "3 · Runtime rule only"}]}},
+                   {"color": "#9A3412", "value": "Both rules"}, {"color": "#EA580C", "value": "Watchlist only"},
+                   {"color": "#FDBA74", "value": "Runtime rule only"}]}},
                fields=[field("tier"), field("precision_pct")]),
-           {"encodings": {"x": {"axis": {"labelAngle": 0, "hideTitle": True}}, "label": {"show": True}}}, boxed_title=False),
-        ui(bar("p5-challenger", "ds_p5_challenger", cat("workload", "Same number of alerts as"), qty("precision_pct", "Right (%)"),
-               "Rules vs a simple model at the same workload, 2026 (% of flags followed by a failure)", 0, 15, GRID, 6,
-               color=cat("method", "Method"), group=True,
-               fields=[field("workload"), field("method"), field("precision_pct")]),
-           {"encodings": {"x": {"axis": {"labelAngle": 0}}, "color": {**LEGEND_BOTTOM, "scale": {"mappings": [
-               {"color": "#9CA3AF", "value": "Rule"}, {"color": "#EA580C", "value": "Logistic regression"},
-               {"color": "#9A3412", "value": "Gradient-boosted trees"}]}}, "label": {"show": True}}}, boxed_title=False),
-        text("p5-rules-note", "**How to read the early-warning test.** Rule frozen on Jun–Dec 2025: alert when a producing well has 2+ partial-run days in a week (down-day and efficiency rules did not add precision). An alert is a hit if the well stops for a rod, pump or tubing failure 2–30 days later; one alert per well per 14 days. Recommendation: lead with the recency watchlist; add the runtime rule if crews can handle about 9 alerts per area per week, which lifts failures caught from 500 to 813 of 1,432. **Model challenger:** one row per producing well every 14 days, trained on Jun–Dec 2025 and tested on Jan–Oct 2026 at the same number of flags; it beats the rules by 4–7 points, so we pilot it next to the rules (notebooks/04b_ml_challenger.py).", 0, 21, GRID, 3),
-    ]
-
-    p6 = [
-        subtitle("p6", "We cleaned the raw files, logged every rule, and list what the data cannot tell us."),
-        counter("p6-rows", "ds_p6_clean", "rows_affected", "Rows changed by cleaning rules", 0, 1, "SUM"),
-        text("p6-limits", "**What this data cannot tell us.** The failure log starts in Jun 2025. Rod truck cost is missing before 2023. Costs are field estimates, not invoiced costs. Lost oil is an operator estimate. Torque and current repeat day to day (manual entries). The netback is company-wide, not heavy-oil only. Action effects are associations, not proven causes.", 4, 1, 8, 2),
-        table("p6-log", "ds_p6_clean", [("rule", "Rule"), ("table_name", "Table"), ("rows_affected", "Rows affected"),
-                                         ("share_of_table_pct", "Share of source rows (%)")], "Cleaning log (latest run)", 0, 3, GRID, 8),
-        text("p6-ranking", "**Does cleaning change who is on the list? No.** We ranked wells by 12-month cost (repair $ + lost-oil value, Oct 28, 2025 to Oct 27, 2026) on the raw files and again after cleaning. The top 10, 25, 50 and 100 wells are identical, no top-50 well moves a single place, and total cost changes by 0.01%. The rules that matter for the ranking remove 23 duplicate jobs and 29 duplicate well-days; the pressure fixes (999999 placeholders, out-of-range values) and sensor caps do not enter the cost score.", 0, 11, GRID, 2),
+           {"encodings": {"x": {"axis": {"labelAngle": 0, "hideTitle": True},
+                                "scale": {"sort": {"by": "custom-order", "orderedValues": ["Both rules", "Watchlist only", "Runtime rule only"]}}},
+                          "label": {"show": True}}}, boxed_title=False),
+        text("p5-ml", "### Could machine learning do better?\nWe trained two machine-learning models on 2025 data and let each flag the same number of wells as the watchlist in 2026 (2,157 flags), so the comparison is fair. Both were correct more often than the watchlist and caught 64 to 78 more breakdowns. The gain is real but modest and comes from one test, so we would run a model alongside the rules in the pilot before relying on it.",
+             0, 19, 5, 6),
+        ui(bar("p5-challenger", "ds_p5_challenger", cat("method", "Method"), qty("precision_pct", "Flags that were correct (%)"),
+               "Same number of flags (2,157): how often each method was correct in 2026", 5, 19, 7, 6,
+               color=cat("method", "Method"), fields=[field("method"), field("precision_pct")]),
+           {"encodings": {"x": {"axis": {"labelAngle": 0, "hideTitle": True},
+                                "scale": {"sort": {"by": "custom-order", "orderedValues": ["Watchlist rule", "Model: logistic regression", "Model: boosted trees"]}}},
+                          "color": {"scale": {"mappings": [
+                              {"color": "#9CA3AF", "value": "Watchlist rule"}, {"color": "#EA580C", "value": "Model: logistic regression"},
+                              {"color": "#9A3412", "value": "Model: boosted trees"}]}},
+                          "label": {"show": True}}}, boxed_title=False),
+        text("p6-h3", "### Can we trust the data?\nWe cleaned the raw files (duplicate rows, impossible pressure readings, 32 spellings of pump makes) and logged every change below. Cleaning did not change which wells come out on top: the 100 most expensive wells are the same with or without it.",
+             0, 25, GRID, 2),
+        counter("p6-rows", "ds_p6_clean", "rows_affected", "Rows changed by cleaning", 0, 27, "SUM"),
+        text("p6-limits", "**What this data can't tell us.** Failure records only start in June 2025. Repair costs are field estimates, not invoices. Lost oil is estimated by operators. Torque and motor current repeat day to day, so we did not use them. The oil value is a company-wide figure. The effect of each fix is an estimate, not a proven result.", 4, 27, 8, 2),
+        table("p6-log", "ds_p6_clean", [("rule", "What we fixed"), ("table_name", "Table"), ("rows_affected", "Rows changed"),
+                                         ("share_of_table_pct", "Share of rows (%)")], "Cleaning log", 0, 29, GRID, 8),
     ]
 
     area_ds = ["ds_p1_kpis", "ds_p1_loss_month", "ds_p1_spend_month", "ds_p2_gap", "ds_p3_list", "ds_p3_alerts", "ds_ov_wells"]
@@ -754,8 +764,7 @@ def build():
             page("p2", "Recurrence Analysis", p2),
             page("p3", "Work Order Priorities", p3),
             page("p4", "Return on Action", p4),
-            page("p5", "Model Validation", p5),
-            page("p6", "Data Quality", p6),
+            page("p5", "Validation & Data Quality", p5),
             {"name": "filters", "displayName": "Filters", "pageType": "PAGE_TYPE_GLOBAL_FILTERS", "layout": [filt, scenario_filter, uwi_filter],
              "layoutVersion": "GRID_V1"},
         ],

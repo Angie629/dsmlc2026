@@ -42,10 +42,10 @@ Rod failures are chronic, not one-off. A short, regularly refreshed list of repe
 Rod Truck and Workover repairs cost about C$33M a year (field estimates, Jun 2025 – Oct 2026), plus C$8.4M of downhole lost oil over the same period. The money concentrates on wells that keep failing. *Dashboard: [Cost Drivers](dashboard/Cost%20Drivers.png).* Each bullet names the dashboard tab it comes from; the links open the screenshots.
 
 - **Failures repeat, and recent failures are the strongest warning.** 57% of failures are followed by another on the same well within 90 days (rods: about two in three). Wells with 0 / 1 / 2 / 3+ failures in the last 90 days fail again within 90 days 26% / 40% / 61% / 70% of the time. Today's watchlist (2+ recent failures) is 114 wells holding 24.9% of the last 12 months' repair spend on wells with a logged failure. *Dashboard: [Recurrence Analysis](dashboard/Recurrence%20Analysis.png); watchlist on [Work Order Priorities](dashboard/Work%20Order%20Priorities.png).*
-- **Long-history ranking helps only modestly.** Ranked on pre-Jun 2025 history and tested on later cost, the top 10% of wells catch 16.5% of later cost (95% interval 14.3–19.9%, 1.65× random). That is about the same as ranking by well size (15.9%), so the work list leads with recent failures and uses cost second. *Dashboard: [Model Validation](dashboard/Model%20Validation.png).*
+- **Long-history ranking helps only modestly.** Ranked on pre-Jun 2025 history and tested on later cost, the top 10% of wells catch 16.5% of later cost (95% interval 14.3–19.9%, 1.65× random). That is about the same as ranking by well size (15.9%), so the work list leads with recent failures and uses cost second. *Dashboard: [Validation & Data Quality](dashboard/Validation%20%26%20Data%20Quality%20-%201.png).*
 - **Two actions pay back in about 2 years if they halve failures.** Rods are 76% of failures but 42% of repair dollars; pump and tubing are 22% of failures but 56% of dollars. A rod string upgrade or corrosion inhibition on 100 rod bad actors pays back in 1.8 years at 50% fewer failures (3.5 at 25%). Pump and tubing failure prevention on 26 wells pays back in 2.0 years (4.1 at 25%). Treating the top 25 wells costs C$0.85M and pays back in 1.1–2.3 years. In Cactus Lake, rods fail 0.55 times a year per well below 150 RPM vs 1.50 at 250–349 RPM, a cheap lever (an association, not a proven cause). *Dashboard: [Return on Action](dashboard/Return%20on%20Action%20-%20Budget.png) (payback, sensitivity, budget scenarios); failure vs dollar shares on [Cost Drivers](dashboard/Cost%20Drivers.png). The RPM rates are in `03b_runlife_payback` (`gold_failure_rates`), not on the dashboard.*
-- **The recency watchlist is the early warning; the runtime rule adds reach.** On the 2026 holdout, the watchlist is right 28.8% of the time and catches 35% of failures, a median 22 days ahead. Adding the rule "2+ partial-run days in a week" raises failures caught from 500 to 813 (of 1,432) for about 9 alerts per area per week. Alerts where both fire are right 34.1% of the time, so crews work those first. *Dashboard: [Model Validation](dashboard/Model%20Validation.png); current alerts on [Work Order Priorities](dashboard/Work%20Order%20Priorities.png). The tier split is in `04b_ml_challenger`, not on the dashboard.*
-- **A simple model beats the rules at the same workload, but only modestly.** Trained on 2025 and tested on 2026 with the same number of alerts as the rules, logistic regression and gradient-boosted trees gain 4–7 points of precision and catch 70–110 more failures (for example 36.8% vs 30.7% at the watchlist's volume). With short failure history and patchy torque data, we recommend the rules now and a model pilot as the next step. *Not on the dashboard: see [Alert tiers and an ML challenger](#alert-tiers-and-an-ml-challenger-2026-holdout) and `notebooks/04b_ml_challenger.py`.*
+- **The recency watchlist is the early warning; the runtime rule adds reach.** On the 2026 holdout, the watchlist is right 28.8% of the time and catches 35% of failures, a median 22 days ahead. Adding the rule "2+ partial-run days in a week" raises failures caught from 500 to 813 (of 1,432) for about 9 alerts per area per week. Alerts where both fire are right 34.1% of the time, so crews work those first. *Dashboard: [Validation & Data Quality](dashboard/Validation%20%26%20Data%20Quality%20-%201.png); current alerts on [Work Order Priorities](dashboard/Work%20Order%20Priorities.png). The tier split is in `04b_ml_challenger`, not on the dashboard.*
+- **A simple model beats the rules at the same workload, but only modestly.** Trained on 2025 and tested on 2026 with the same number of alerts as the rules, logistic regression and gradient-boosted trees gain 3–7 points of precision and catch 64–113 more failures (for example 36.5% vs 30.7% at the watchlist's volume). With short failure history and patchy torque data, we recommend the rules now and a model pilot as the next step. *Not on the dashboard: see [Alert tiers and an ML challenger](#alert-tiers-and-an-ml-challenger-2026-holdout) and `notebooks/04b_ml_challenger.py`.*
 
 ## Data
 
@@ -141,11 +141,11 @@ cost_score = repair_$ + downhole_lost_oil_m3 × 6.2898 × netback_per_bbl
 
 ### Alert tiers and an ML challenger (2026 holdout)
 
-We lead with transparent rules and kept machine learning to one time-boxed challenger, scored at the same workload as the rules. Both checks run in `notebooks/04b_ml_challenger.py`, which re-runs the `04a` alert test and asserts that it matches `gold_warning_eval` exactly (watchlist 28.8%, runtime rule 17.0%, either rule 21.6%; 500, 625 and 813 of 1,432 failures caught). The tables below are from the first, local run; the notebook writes the final numbers to `gold_alert_tiers` and `gold_model_eval`, and the Model Validation tab reads them.
+We lead with transparent rules and kept machine learning to one time-boxed challenger, scored at the same workload as the rules. Both checks run in `notebooks/04b_ml_challenger.py`, which re-runs the `04a` alert test and asserts that it matches `gold_warning_eval` exactly (watchlist 28.8%, runtime rule 17.0%, either rule 21.6%; 500, 625 and 813 of 1,432 failures caught). The tables below are from the Databricks run (`gold_alert_tiers`, `gold_model_eval`), which the Validation & Data Quality tab reads.
 
 **Alert tiers (n6).** We split the combined alert stream by which rule fired on the alert day:
 
-| Tier                  | Alerts | Precision | Failures caught (of 1,410) |
+| Tier                  | Alerts | Precision | Failures caught (of 1,432) |
 | --------------------- | ------ | --------- | -------------------------- |
 | 1 · both rules        | 273    | **34.1%** | 105                        |
 | 2 · watchlist only    | 2,064  | 28.1%     | 442                        |
@@ -159,16 +159,16 @@ Crews should work tier 1 first, then tier 2. Tier 3 alerts are right about one t
 - **Features, all from before the snapshot:** recent failures, days since the last failure, last failure type, repair $, partial-run and down days, efficiency drift, area and pump make.
 - **Test:** Jan–Oct 2026 snapshots, with no tuning on 2026. We take as many top-scored snapshots as the rule flags on the same snapshots, so the workload is the same.
 
-| Same workload as | Method                 | Flagged | Precision | Failures caught (of 1,518) |
+| Same workload as | Method                 | Flagged | Precision | Failures caught (of 1,520) |
 | ---------------- | ---------------------- | ------- | --------- | -------------------------- |
 | Watchlist        | Recency watchlist      | 2,157   | 30.7%     | 477                        |
-|                  | Logistic regression    | 2,157   | **36.8%** | 546                        |
-|                  | Gradient-boosted trees | 2,157   | 34.4%     | 549                        |
+|                  | Logistic regression    | 2,157   | **36.5%** | 541                        |
+|                  | Gradient-boosted trees | 2,157   | 34.1%     | 555                        |
 | Either rule      | Either rule            | 3,182   | 24.3%     | 588                        |
-|                  | Logistic regression    | 3,182   | 31.2%     | 679                        |
-|                  | Gradient-boosted trees | 3,182   | 30.6%     | **697**                    |
+|                  | Logistic regression    | 3,182   | **31.4%** | 688                        |
+|                  | Gradient-boosted trees | 3,182   | 30.2%     | **701**                    |
 
-At the same workload, the models catch 70–110 more failures than the rules (4–7 points more precision). That beats the rules, but only modestly. The logistic regression's largest weights are operating area (Winter higher, Fenn Big Valley lower), down days in the last 30 days (which lower the score) and repair $. So part of the gain is learning each area's base rate, which a rule could also use. It is one time split with no tuning. We keep the rules as the recommendation for now and treat the model as the next step to pilot once more failure history exists. We would adopt it only if it holds this edge without more alerts.
+At the same workload, the models catch 64–113 more failures than the rules (3–7 points more precision). That beats the rules, but only modestly. The logistic regression's largest weights are operating area (Winter higher, Fenn Big Valley lower), down days in the last 30 days (which lower the score) and repair $. So part of the gain is learning each area's base rate, which a rule could also use. It is one time split with no tuning. We keep the rules as the recommendation for now and treat the model as the next step to pilot once more failure history exists. We would adopt it only if it holds this edge without more alerts.
 
 ## Implementation plan (30/60/90 days)
 
@@ -230,9 +230,11 @@ Each limitation says how it moves the results. "Conservative" means the true ben
 - Script: [docs/presentation_script.md](docs/presentation_script.md)
 - AI usage log: [AI_LOG.md](AI_LOG.md)
 - Dashboard screenshots (Databricks AI/BI dashboard, "Reliability Investment Dashboard"):
+  - [Overview](dashboard/Overview.png): the whole story on one page, with the well map
   - [Cost Drivers](dashboard/Cost%20Drivers.png): where repair dollars and lost oil go
   - [Recurrence Analysis](dashboard/Recurrence%20Analysis.png): how often failures come back
   - [Work Order Priorities](dashboard/Work%20Order%20Priorities.png): this week's ranked work list and runtime alerts
-  - [Return on Action – Budget](dashboard/Return%20on%20Action%20-%20Budget.png): payback sensitivity and budget scenarios
-  - [Model Validation](dashboard/Model%20Validation.png): out-of-time ranking test and early-warning results
-  - [Data Quality](dashboard/Data%20Quality.png): cleaning rules and what the data cannot tell us
+  - [Return on Action](dashboard/Return%20on%20Action.png): payback per action and the sensitivity table
+  - [Return on Action – Budget](dashboard/Return%20on%20Action%20-%20Budget.png): budget scenarios and the wells to treat
+  - [Validation & Data Quality](dashboard/Validation%20%26%20Data%20Quality%20-%201.png): out-of-time tests of the ranking and the alert rules
+  - [Validation & Data Quality, continued](dashboard/Validation%20%26%20Data%20Quality%20-%202.png): machine-learning comparison and the cleaning log
