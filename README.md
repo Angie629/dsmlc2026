@@ -81,7 +81,7 @@ notebooks/        Databricks notebooks, run in order
   04a_early_warning  sensors before failures, threshold grid, holdout evaluation and gold alert outputs
   (05 reserved for weather: not used, power downtime is not seasonal)
 src/              shared cleaning and feature functions
-dashboard/        AI/BI dashboard: strathcona_reliability_desk.lvdash.json + build_reliability_desk.py (tests every query)
+dashboard/        AI/BI dashboard: Reliability Investment Dashboard.lvdash.json + build_dashboard.py (tests every query)
 docs/             slides (PDF), figures, known issues
 decision/         team planning pages (research question vote, build plan)
 .claude/skills/   reference notes used with Claude Code (dataset, domain, rubric)
@@ -91,7 +91,7 @@ decision/         team planning pages (research question vote, build plan)
 
 1. Upload the three Parquet files to a Unity Catalog volume in a Databricks workspace.
 2. Run the `notebooks/01a` to `01d` notebooks in letter order, then `02a_ranking` to `04a_early_warning`, in order on serverless compute.
-3. Import `dashboard/strathcona_reliability_desk.lvdash.json` (Dashboards → Create → Import from file), or regenerate it with `python dashboard/build_reliability_desk.py build`.
+3. Import `dashboard/Reliability Investment Dashboard.lvdash.json` (Dashboards → Create → Import from file), or regenerate it with `python dashboard/build_dashboard.py build`.
 
 Credentials are never stored in the notebooks or this repo. Use Databricks secrets or environment variables.
 
@@ -113,6 +113,7 @@ Team docs:
 - Negative oil/water volumes excluded from rate calculations.
 - Pump sensor spikes capped (RPM above 1,000; current and torque above the 99.9th percentile).
 - Pump make (about 32 spellings), job category, failure type and downtime codes mapped to canonical lists.
+- Cleaning does not change the ranking: with and without cleaning, the top 10/25/50/100 wells by 12-month cost (Oct 28, 2025 – Oct 27, 2026) are identical, and total cost moves by 0.01%. The pressure and sensor fixes do not enter the cost score.
 
 **Cost score.** For each well and period:
 
@@ -134,9 +135,46 @@ cost_score = repair_$ + downhole_lost_oil_m3 × 6.2898 × netback_per_bbl
 - **Early warning:** thresholds on runtime instability and efficiency, chosen on June–December 2025 failures (aligned to the stop day) and frozen before testing on January–October 2026. Precision, recall, median lead time and alerts per area per week, compared with the recency watchlist and with random alerts at the same rate.
 - **Payback:** sensitivity to netback, action cost and failure-reduction rate. Equipment effects are observational and reported as associations.
 
+## Implementation plan (30/60/90 days)
+
+**Value at stake.** Rod Truck and Workover spend on eligible wells was C$47.0M from Jun 2025 to Oct 2026 (about C$33M a year), plus C$8.4M of downhole lost oil at C$32.50/boe. Today's watchlist, the 114 wells with 2+ failures in the last 90 days, holds 24.9% of the last 12 months' repair spend on wells with a logged failure. *Sourced from field estimates in `well_jobs`; not invoices.*
+
+**Pilot areas: Cactus Lake and Winter.** Together they have 62% of failures since Jun 2025 (945 and 826 of 2,841), which gives the pilot enough events to measure in 90 days.
+- **Cactus Lake is where the money is.** It accounts for about 42% of Rod Truck and Workover dollars, and 44% of its jobs are workovers.
+- **Winter is where failures repeat.** 81.5% of its failures are followed by another on the same well within 90 days, against 57% overall. Most of its jobs are cheaper rod truck jobs.
+
+| Days | What happens | Owner (proposed) |
+|---|---|---|
+| 0–30 | A weekly reliability review in each pilot area, driven by the dashboard work list: recency first, then 12-month cost. Each well on the list gets a root-cause note. | Area production engineer leads; the data owner refreshes the tables weekly |
+| 31–60 | Pick a budget scenario. The top 25 wells cost C$0.85M and pay back in 2.3 years at 25% fewer failures, or 1.1 years at 50%. Run a root-cause review on every well with a second failure within 90 days. For Cactus Lake, also trial slower pump speeds on fast wells (rods fail 0.55/well-year below 150 RPM vs 1.50 at 250–349 RPM). | Operations superintendent approves the budget; rig and rod-truck coordinators schedule the work |
+| 61–90 | Measure the KPIs against the 0–30 day baseline. Add the runtime alert rule only in areas whose crews can handle about 9 alerts per area per week. Expand area by area. | Reliability lead |
+
+**Resources.**
+- **Money:** the action cost of C$34,152 per well is *assumed* (the 2023+ Workover median), and the 25%/50% failure reduction is *assumed* (it brackets one vendor case of about 34%). The netback (C$32.50/boe, Strathcona Q3 2026 operating earnings) and the repair costs are *sourced*.
+- **Manpower** *(our estimate, to confirm with operations)*: the weekly review needs about 1 hour from the area engineer and a foreman. The data owner reruns the notebooks weekly.
+- **Logistics** *(proposal)*: do each action when the rig or rod truck is already on the well for its next repair, so most actions need no extra mobilization. Rod Truck and Workover jobs run about 5% lower in Apr–May (2023–2025 average), which leaves room to schedule pilot work then.
+- **Time:** savings start with the first avoided failure. Most repeat failures come back within about six weeks, so a change should show in the 90-day re-failure rate within one quarter.
+
+**KPIs.** 90-day re-failure rate, failures per well-year, repair $ per well-year, downhole lost oil (m³), and alerts per area per week.
+
+**Data fixes needed to run this for real.** Record the actual job cost (`actual_final_job_cost` is empty today). Keep a failure log from before Jun 2025 if one exists. Use one spelling per failure type. Get daily torque and current readings instead of repeated manual entries.
+
 ## Limitations
 
-*Pending. Filled in Saturday afternoon.*
+Each limitation says how it moves the results. "Conservative" means the true benefit is probably larger than reported.
+
+| Limitation | Effect on results |
+|---|---|
+| The failure log starts in Jun 2025, so bad actors are picked on 7 months and measured on 10. | Wide intervals on rates and payback. Measuring on the months used to pick would **overstate** the rates (rods 6.99/yr while picking vs 4.05/yr after), so we measure on later months. |
+| Rod Truck cost is missing before 2023, and earlier history uses repair jobs as a stand-in for failures. | The ranking starts in 2023. History-based ranking only modestly beats ranking by well size (top 10% catches 16.5% vs 15.9% of later cost). |
+| Repair cost is the field estimate (`field_est_total`); invoiced cost is empty. | Direction **unknown**. Payback scales with cost per failure: 20% higher real costs shorten payback by about a sixth. |
+| The netback is company-wide operating earnings (C$32.50/boe), not a heavy-oil netback. | Small effect. Netback ±25% moves Action 1's payback from 1.77 to between 1.65 and 1.90 years at 50% fewer failures. Repair dollars, not lost oil, drive the savings. |
+| `lost_oil_m3` is an operator estimate and is null on 67.5% of daily rows; nulls count as zero. | Lost-oil value is **understated**, so savings are understated and payback is **conservative**. |
+| Downtime codes are only partly mapped to causes; unmapped codes fall in "Other". | Downhole lost oil per failure is likely **understated** (conservative), and the cause split on page 1 is approximate. |
+| `failure_start_date` is logged a median 2 days after the well stops. | Handled by anchoring on the stop day. Any stops we miss would **understate** lost oil per failure (conservative). |
+| Action cost (C$34,152) and its effect (25% or 50% fewer failures) are assumptions, not measured. | Payback is proportional to both: half the action cost halves payback (1.77 → 0.88 years for Action 1 at 50%). We report the range, not one number. |
+| Equipment and RPM comparisons are observational. | Harder wells may get particular pumps or run faster, so switching equipment may deliver **less** than the gap suggests. Reported as associations. |
+| Torque, current and RPM repeat day to day, and torque covers 6% of Cactus Lake failures. | The early warning uses runtime only, so its recall (43.6%) is a **lower bound** on what daily sensor readings could give. |
 
 ## External resources
 

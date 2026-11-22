@@ -763,7 +763,7 @@ capture = test.join(top.select('uwi'), 'uwi').agg(F.sum('cost_score')) / test.ag
 
 #### `n8` Dashboard improvements · Angie
 
-**Inputs:** Dashboard `Strathcona Reliability Desk`; `dashboard/build_reliability_desk.py`
+**Inputs:** Dashboard `Reliability Investment Dashboard`; `dashboard/build_dashboard.py`
 
 1. First look at every page in Databricks and fix anything broken or hard to read (labels cut off, wrong sort, empty widgets).
 2. Add a one-page summary as page 1: four numbers (about C$33M a year repair spend, 57% repeat within 90 days, 114 watchlist wells, payback 1.8–3.5 years) and the three recommendations from c2. This is the page for the video and judges.

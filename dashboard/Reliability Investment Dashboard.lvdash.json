@@ -1,0 +1,3854 @@
+{
+  "datasets": [
+    {
+      "name": "ds_p1_kpis",
+      "displayName": "Spend and lost oil, last 12 months, by area",
+      "queryLines": [
+        "WITH area AS (SELECT DISTINCT field_operating_area FROM workspace.dsmlc.gold_well_month WHERE field_operating_area IS NOT NULL),\n",
+        "rep AS (SELECT field_operating_area, SUM(field_est_clean) AS repair_cost_12m FROM workspace.dsmlc.silver_jobs\n",
+        "        WHERE is_repair AND start_date > DATE'2025-10-27' GROUP BY field_operating_area),\n",
+        "lost AS (SELECT field_operating_area, SUM(lost_oil_m3) AS lost_m3 FROM workspace.dsmlc.silver_downtime\n",
+        "         WHERE is_downhole AND production_date > DATE'2025-10-27' GROUP BY field_operating_area)\n",
+        "SELECT a.field_operating_area,\n",
+        "       COALESCE(r.repair_cost_12m, 0) AS repair_cost_12m,\n",
+        "       COALESCE(l.lost_m3, 0) AS downhole_lost_oil_m3_12m,\n",
+        "       COALESCE(l.lost_m3, 0) * 6.2898 * (SELECT MAX(netback_cad_per_bbl) FROM workspace.dsmlc.gold_well_period) AS downhole_lost_oil_value_12m\n",
+        "FROM area a LEFT JOIN rep r USING (field_operating_area) LEFT JOIN lost l USING (field_operating_area)\n"
+      ]
+    },
+    {
+      "name": "ds_p1_loss_month",
+      "displayName": "Lost oil by cause and month",
+      "queryLines": [
+        "SELECT DATE_TRUNC('MONTH', production_date) AS month,\n",
+        "       field_operating_area,\n",
+        "       CASE WHEN bucket IN ('Downhole', 'Surface equipment', 'Facility / pipeline', 'Power', 'Planned') THEN bucket ELSE 'Other' END AS downtime_bucket,\n",
+        "       SUM(lost_oil_m3) AS lost_oil_m3\n",
+        "FROM workspace.dsmlc.silver_downtime\n",
+        "WHERE flow_direction = 'production' AND production_date >= DATE'2023-01-01'\n",
+        "  AND bucket NOT IN ('Economic', 'Injection') AND lost_oil_m3 > 0\n",
+        "GROUP BY ALL\n"
+      ]
+    },
+    {
+      "name": "ds_p1_type_share",
+      "displayName": "Share of failures and repair cost by failure type",
+      "queryLines": [
+        "WITH f AS (\n",
+        "  SELECT CASE WHEN failure_type_norm IN ('Rods', 'Pump', 'Tubing') THEN failure_type_norm ELSE 'Other' END AS failure_type,\n",
+        "         CASE WHEN job_id IS NOT NULL THEN linked_job_cost / COUNT(*) OVER (PARTITION BY job_id) END AS cost\n",
+        "  FROM workspace.dsmlc.silver_failures WHERE failure_start_date >= DATE'2025-06-01')\n",
+        "SELECT failure_type,\n",
+        "       ROUND(100 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS share_of_failures_pct,\n",
+        "       ROUND(100 * SUM(COALESCE(cost, 0)) / SUM(SUM(COALESCE(cost, 0))) OVER (), 1) AS share_of_repair_cost_pct\n",
+        "FROM f GROUP BY failure_type\n"
+      ]
+    },
+    {
+      "name": "ds_p1_repair_area",
+      "displayName": "Repair spend by area and job type, last 12 months",
+      "queryLines": [
+        "SELECT field_operating_area, job_category_norm AS job_category, SUM(field_est_clean) AS repair_cost\n",
+        "FROM workspace.dsmlc.silver_jobs\n",
+        "WHERE is_repair AND start_date > DATE'2025-10-27' AND field_est_clean > 0\n",
+        "GROUP BY ALL\n"
+      ]
+    },
+    {
+      "name": "ds_p2_counters",
+      "displayName": "Re-failure within 90 days",
+      "queryLines": [
+        "SELECT ROUND(100 * AVG(refail_90), 1) AS refail_90d_all_pct,\n",
+        "       ROUND(100 * AVG(CASE WHEN failure_type_norm = 'Rods' THEN refail_90 END), 1) AS refail_90d_rods_pct,\n",
+        "       ROUND(100 * AVG(CASE WHEN failure_type_norm IN ('Pump', 'Tubing') THEN refail_90 END), 1) AS refail_90d_pump_tubing_pct,\n",
+        "       COUNT(*) AS failures_with_followup\n",
+        "FROM workspace.dsmlc.gold_failure_gap WHERE in_log_window AND has_90d_followup\n"
+      ]
+    },
+    {
+      "name": "ds_p2_refail_type",
+      "displayName": "Re-failure by days since failure",
+      "queryLines": [
+        "WITH e AS (\n",
+        "  SELECT\n",
+        "    failure_type_norm AS failure_type,\n",
+        "    days_to_next AS d\n",
+        "  FROM\n",
+        "    workspace.dsmlc.gold_failure_gap\n",
+        "  WHERE\n",
+        "    failure_start_date BETWEEN DATE '2025-06-01' AND DATE '2026-07-28'\n",
+        "    AND failure_type_norm IN ('Rods', 'Pump', 'Tubing')\n",
+        "),\n",
+        "g AS (\n",
+        "  SELECT\n",
+        "    d,\n",
+        "    CASE\n",
+        "      WHEN failure_type = 'Rods' THEN 'Rods'\n",
+        "      ELSE 'Pump and tubing'\n",
+        "    END AS failure_group\n",
+        "  FROM\n",
+        "    e\n",
+        "  UNION ALL\n",
+        "  SELECT\n",
+        "    d,\n",
+        "    'All failures'\n",
+        "  FROM\n",
+        "    e\n",
+        ")\n",
+        "SELECT\n",
+        "  failure_group,\n",
+        "  day AS days_since_failure,\n",
+        "  ROUND(\n",
+        "    100\n",
+        "      * AVG(\n",
+        "        CASE\n",
+        "          WHEN\n",
+        "            d IS NOT NULL\n",
+        "            AND d <= day\n",
+        "          THEN\n",
+        "            1.0\n",
+        "          ELSE 0.0\n",
+        "        END\n",
+        "      ),\n",
+        "    1\n",
+        "  ) AS share_repeated_pct\n",
+        "FROM\n",
+        "  g\n",
+        "    CROSS JOIN (\n",
+        "      SELECT\n",
+        "        explode(sequence(0, 90)) AS day\n",
+        "    ) days\n",
+        "GROUP BY\n",
+        "  1,\n",
+        "  2"
+      ]
+    },
+    {
+      "name": "ds_p2_gap",
+      "displayName": "First-time vs repeat failures per month",
+      "queryLines": [
+        "WITH f AS (\n",
+        "  SELECT\n",
+        "    field_operating_area,\n",
+        "    failure_type_norm AS failure_type,\n",
+        "    failure_start_date AS failure_date,\n",
+        "    LAG(failure_start_date) OVER (PARTITION BY uwi ORDER BY failure_start_date) AS prev_failure_date\n",
+        "  FROM\n",
+        "    workspace.dsmlc.gold_failure_gap\n",
+        "  WHERE\n",
+        "    failure_start_date >= DATE '2025-06-01'\n",
+        ")\n",
+        "SELECT\n",
+        "  date_trunc('MONTH', failure_date) AS month,\n",
+        "  field_operating_area,\n",
+        "  failure_type,\n",
+        "  CASE\n",
+        "    WHEN\n",
+        "      prev_failure_date IS NOT NULL\n",
+        "      AND datediff(failure_date, prev_failure_date) <= 90\n",
+        "    THEN\n",
+        "      'Repeat (within 90 days of the last failure)'\n",
+        "    ELSE 'First failure, or over 90 days since the last'\n",
+        "  END AS failure_kind,\n",
+        "  COUNT(*) AS failures\n",
+        "FROM\n",
+        "  f\n",
+        "WHERE\n",
+        "  failure_date >= DATE '2025-09-01'\n",
+        "GROUP BY\n",
+        "  1,\n",
+        "  2,\n",
+        "  3,\n",
+        "  4"
+      ]
+    },
+    {
+      "name": "ds_p2_monthly",
+      "displayName": "Failures per month by type",
+      "queryLines": [
+        "SELECT DATE_TRUNC('MONTH', failure_start_date) AS month,\n",
+        "       field_operating_area,\n",
+        "       CASE WHEN failure_type_norm IN ('Rods', 'Pump', 'Tubing') THEN failure_type_norm ELSE 'Other' END AS failure_type,\n",
+        "       COUNT(*) AS failures\n",
+        "FROM workspace.dsmlc.gold_failure_gap WHERE in_log_window\n",
+        "GROUP BY ALL\n"
+      ]
+    },
+    {
+      "name": "ds_p2_tier",
+      "displayName": "Chance of failure in the next 90 days by recent failures",
+      "queryLines": [
+        "SELECT\n",
+        "  tier,\n",
+        "  ROUND(100 * AVG(failed_next_90), 1) AS p_fail_next_90d_pct,\n",
+        "  COUNT(*) AS well_snapshots\n",
+        "FROM\n",
+        "  workspace.dsmlc.gold_recency_tier\n",
+        "WHERE\n",
+        "  NOT is_current\n",
+        "GROUP BY\n",
+        "  tier\n",
+        "ORDER BY\n",
+        "  tier"
+      ]
+    },
+    {
+      "name": "ds_p2_chronic",
+      "displayName": "Wells and failures by failures per well",
+      "queryLines": [
+        "WITH w AS (SELECT uwi, COUNT(*) AS n FROM workspace.dsmlc.gold_failure_gap WHERE in_log_window GROUP BY uwi)\n",
+        "SELECT CASE WHEN n >= 5 THEN '5+' ELSE CAST(n AS STRING) END AS failures_per_well,\n",
+        "       ROUND(100 * COUNT(*) / SUM(COUNT(*)) OVER (), 1) AS share_of_wells_pct,\n",
+        "       ROUND(100 * SUM(n) / SUM(SUM(n)) OVER (), 1) AS share_of_failures_pct\n",
+        "FROM w GROUP BY ALL\n"
+      ]
+    },
+    {
+      "name": "ds_p3_list",
+      "displayName": "Work list: wells with a failure in the last 90 days",
+      "queryLines": [
+        "WITH cur AS (SELECT uwi, field_operating_area, failures_prior_90, last_failure_date FROM workspace.dsmlc.gold_recency_tier\n",
+        "             WHERE is_current AND failures_prior_90 >= 1),\n",
+        "lastf AS (SELECT uwi, failure_type_norm, cause FROM (\n",
+        "            SELECT uwi, failure_type_norm, cause,\n",
+        "                   ROW_NUMBER() OVER (PARTITION BY uwi ORDER BY failure_start_date DESC, failure_id) AS rn\n",
+        "            FROM workspace.dsmlc.silver_failures) WHERE rn = 1),\n",
+        "nm AS (SELECT uwi, MAX(well_name) AS well_name FROM workspace.dsmlc.silver_failures GROUP BY uwi),\n",
+        "lastm AS (SELECT uwi, facility_name, pcp_pump_make_norm FROM (\n",
+        "            SELECT uwi, facility_name, pcp_pump_make_norm, ROW_NUMBER() OVER (PARTITION BY uwi ORDER BY month DESC) AS rn\n",
+        "            FROM workspace.dsmlc.gold_well_month WHERE facility_name IS NOT NULL) WHERE rn = 1),\n",
+        "rep AS (SELECT uwi, SUM(field_est_clean) AS repair_cost_12m FROM workspace.dsmlc.silver_jobs\n",
+        "        WHERE is_repair AND start_date > DATE'2025-10-27' GROUP BY uwi),\n",
+        "lost AS (SELECT uwi, SUM(lost_oil_m3) AS lost_12m FROM workspace.dsmlc.silver_downtime\n",
+        "         WHERE is_downhole AND production_date > DATE'2025-10-27' GROUP BY uwi),\n",
+        "base AS (\n",
+        "  SELECT c.uwi, n.well_name, c.field_operating_area, m.facility_name, m.pcp_pump_make_norm AS pump_make,\n",
+        "         c.failures_prior_90 AS failures_last_90d, lf.failure_type_norm AS last_failure_type, lf.cause AS last_failure_cause,\n",
+        "         c.last_failure_date, DATEDIFF(DATE'2026-10-27', c.last_failure_date) AS days_since_last_failure,\n",
+        "         COALESCE(r.repair_cost_12m, 0) AS repair_cost_12m, COALESCE(l.lost_12m, 0) AS downhole_lost_oil_m3_12m\n",
+        "  FROM cur c LEFT JOIN lastf lf USING (uwi) LEFT JOIN nm n USING (uwi) LEFT JOIN lastm m USING (uwi)\n",
+        "  LEFT JOIN rep r USING (uwi) LEFT JOIN lost l USING (uwi))\n",
+        "SELECT ROW_NUMBER() OVER (ORDER BY failures_last_90d DESC, repair_cost_12m + downhole_lost_oil_m3_12m * 6.2898 * (SELECT MAX(netback_cad_per_bbl) FROM workspace.dsmlc.gold_well_period) DESC, uwi) AS priority_rank,\n",
+        "       uwi, COALESCE(well_name, uwi) AS well_name, field_operating_area, facility_name, pump_make,\n",
+        "       CASE WHEN failures_last_90d >= 3 THEN '3+ failures' WHEN failures_last_90d = 2 THEN '2 failures' ELSE '1 failure' END AS recency_tier,\n",
+        "       failures_last_90d, last_failure_type, last_failure_date, days_since_last_failure,\n",
+        "       ROUND(repair_cost_12m) AS repair_cost_12m, ROUND(downhole_lost_oil_m3_12m, 1) AS downhole_lost_oil_m3_12m,\n",
+        "       ROUND(repair_cost_12m + downhole_lost_oil_m3_12m * 6.2898 * (SELECT MAX(netback_cad_per_bbl) FROM workspace.dsmlc.gold_well_period)) AS cost_12m,\n",
+        "       CASE WHEN last_failure_type = 'Rods' AND last_failure_cause IN ('Fatigue', 'Corrosion') THEN 'Rod string upgrade or corrosion inhibition'\n",
+        "            WHEN last_failure_type = 'Rods' THEN 'Rod failure root-cause review'\n",
+        "            WHEN last_failure_type IN ('Pump', 'Tubing') THEN 'Pump and tubing failure review'\n",
+        "            ELSE 'Root-cause review' END AS suggested_action,\n",
+        "       CASE WHEN failures_last_90d >= 2 THEN 1 ELSE 0 END AS on_watchlist,\n",
+        "       CASE WHEN failures_last_90d >= 3 THEN 1 ELSE 0 END AS three_plus,\n",
+        "       CASE WHEN failures_last_90d >= 2 THEN ROUND(repair_cost_12m) ELSE 0 END AS watchlist_repair_cost_12m\n",
+        "FROM base\n"
+      ]
+    },
+    {
+      "name": "ds_p3_alerts",
+      "displayName": "Current runtime alerts (last 14 days of data)",
+      "queryLines": [
+        "WITH a AS (SELECT * FROM workspace.dsmlc.gold_alerts WHERE is_current),\n",
+        "nm AS (SELECT uwi, MAX(well_name) AS well_name FROM workspace.dsmlc.silver_daily WHERE production_date >= DATE'2026-10-01' GROUP BY uwi),\n",
+        "t AS (SELECT uwi, failures_prior_90 FROM workspace.dsmlc.gold_recency_tier WHERE is_current)\n",
+        "SELECT a.alert_date, a.uwi, COALESCE(nm.well_name, a.uwi) AS well_name, a.field_operating_area,\n",
+        "       CAST(a.partial_7d AS INT) AS partial_days_last_7,\n",
+        "       COALESCE(t.failures_prior_90, 0) AS failures_last_90d,\n",
+        "       CASE WHEN COALESCE(t.failures_prior_90, 0) >= 2 THEN 'Yes' ELSE 'No' END AS on_watchlist\n",
+        "FROM a LEFT JOIN nm USING (uwi) LEFT JOIN t USING (uwi)\n"
+      ]
+    },
+    {
+      "name": "ds_p5_rules",
+      "displayName": "Runtime rule vs recency watchlist, 2026 holdout",
+      "queryLines": [
+        "SELECT rule_name,\n",
+        "       ROUND(100 * precision, 1) AS precision_pct,\n",
+        "       ROUND(100 * recall, 1) AS recall_pct,\n",
+        "       alerts, alerts_per_area_week, median_lead_days, failures_caught, label_failures\n",
+        "FROM workspace.dsmlc.gold_warning_eval WHERE window = '2026 holdout'\n"
+      ]
+    },
+    {
+      "name": "ds_p4_cost",
+      "displayName": "Cost per failure by type",
+      "queryLines": [
+        "WITH f AS (\n",
+        "  SELECT f.failure_type_norm AS failure_type,\n",
+        "         f.linked_job_cost / COUNT(*) OVER (PARTITION BY f.job_id) AS repair_cost,\n",
+        "         COALESCE(d.downhole_lost_oil_m3, 0) * 6.2898 * (SELECT MAX(netback_cad_per_bbl) FROM workspace.dsmlc.gold_well_period) AS lost_oil_value\n",
+        "  FROM workspace.dsmlc.silver_failures f LEFT JOIN workspace.dsmlc.gold_failure_downtime d USING (failure_id)\n",
+        "  WHERE f.failure_start_date >= DATE'2025-06-01' AND f.linked_job_cost > 0 AND f.failure_type_norm IN ('Rods', 'Pump', 'Tubing'))\n",
+        "SELECT failure_type, COUNT(*) AS failures,\n",
+        "       ROUND(AVG(repair_cost)) AS mean_repair_cost,\n",
+        "       ROUND(AVG(lost_oil_value)) AS mean_lost_oil_value,\n",
+        "       ROUND(AVG(repair_cost + lost_oil_value)) AS mean_cost_per_failure,\n",
+        "       ROUND(MEDIAN(repair_cost + lost_oil_value)) AS median_cost_per_failure,\n",
+        "       ROUND(SUM(repair_cost + lost_oil_value)) AS total_cost\n",
+        "FROM f GROUP BY failure_type\n"
+      ]
+    },
+    {
+      "name": "ds_p4_kpi",
+      "displayName": "Payback headline (base case)",
+      "queryLines": [
+        "SELECT ROUND(MIN(CASE WHEN avoided_share = 0.5 THEN payback_years END), 1) AS fastest_payback_50_years,\n",
+        "       ROUND(MIN(CASE WHEN avoided_share = 0.25 THEN payback_years END), 1) AS fastest_payback_25_years,\n",
+        "       SUM(CASE WHEN avoided_share = 0.5 THEN bad_actor_wells END) AS bad_actor_wells\n",
+        "FROM workspace.dsmlc.gold_payback WHERE is_base_case\n"
+      ]
+    },
+    {
+      "name": "ds_p4_actions",
+      "displayName": "Break-even and payback per action (base case)",
+      "queryLines": [
+        "SELECT action,\n",
+        "       MAX(bad_actor_wells) AS bad_actor_wells,\n",
+        "       MAX(bad_actor_rule) AS bad_actor_rule,\n",
+        "       ROUND(MAX(failures_per_well_year), 2) AS failures_per_well_year,\n",
+        "       ROUND(MAX(mean_cost_per_failure)) AS mean_cost_per_failure,\n",
+        "       ROUND(MAX(action_cost)) AS action_cost,\n",
+        "       ROUND(MAX(failures_to_recover_cost), 2) AS failures_to_recover_cost,\n",
+        "       ROUND(MAX(CASE WHEN avoided_share = 0.25 THEN annual_savings_per_well END)) AS savings_25,\n",
+        "       ROUND(MAX(CASE WHEN avoided_share = 0.5 THEN annual_savings_per_well END)) AS savings_50,\n",
+        "       ROUND(MAX(CASE WHEN avoided_share = 0.25 THEN payback_years END), 2) AS payback_25_years,\n",
+        "       ROUND(MAX(CASE WHEN avoided_share = 0.5 THEN payback_years END), 2) AS payback_50_years\n",
+        "FROM workspace.dsmlc.gold_payback WHERE is_base_case GROUP BY action\n"
+      ]
+    },
+    {
+      "name": "ds_p4_grid",
+      "displayName": "Payback sensitivity grid",
+      "queryLines": [
+        "SELECT action, netback_cad_per_bbl, ROUND(action_cost) AS action_cost,\n",
+        "       CAST(ROUND(100 * avoided_share) AS INT) AS avoided_share_pct,\n",
+        "       ROUND(mean_cost_per_failure) AS mean_cost_per_failure,\n",
+        "       ROUND(annual_savings_per_well) AS annual_savings_per_well,\n",
+        "       ROUND(payback_years, 2) AS payback_years\n",
+        "FROM workspace.dsmlc.gold_payback\n"
+      ]
+    },
+    {
+      "name": "ds_p5_kpi",
+      "displayName": "Ranking validation headline",
+      "queryLines": [
+        "SELECT ROUND(100 * capture, 1) AS capture_10_pct,\n",
+        "       ROUND(lift, 2) AS lift_vs_random,\n",
+        "       CONCAT(ROUND(100 * ci_lo, 1), '% to ', ROUND(100 * ci_hi, 1), '%') AS interval_95,\n",
+        "       ROUND(100 * persistence_top10, 1) AS persistence_pct\n",
+        "FROM workspace.dsmlc.gold_ranking_validation\n",
+        "WHERE ranker = 'Cost + recent' AND target = 'cost' AND k = 0.1\n"
+      ]
+    },
+    {
+      "name": "ds_p5_curve",
+      "displayName": "Share of later cost captured, by ranker",
+      "queryLines": [
+        "SELECT CAST(ROUND(100 * k) AS INT) AS share_targeted_pct, ranker, ROUND(100 * capture, 1) AS share_captured_pct\n",
+        "FROM workspace.dsmlc.gold_ranking_validation WHERE target = 'cost'\n"
+      ]
+    },
+    {
+      "name": "ds_p5_watch",
+      "displayName": "Recency watchlist precision and recall",
+      "queryLines": [
+        "WITH e AS (SELECT failures_prior_90, failed_next_90 FROM workspace.dsmlc.gold_recency_tier WHERE NOT is_current),\n",
+        "f AS (SELECT explode(array(1, 2, 3)) AS k)\n",
+        "SELECT CONCAT(k, '+ failures in last 90 days') AS flag,\n",
+        "       ROUND(100 * AVG(CASE WHEN failures_prior_90 >= k THEN failed_next_90 END), 1) AS precision_pct,\n",
+        "       ROUND(100 * SUM(CASE WHEN failures_prior_90 >= k AND failed_next_90 = 1 THEN 1 ELSE 0 END) / SUM(failed_next_90), 1) AS recall_pct\n",
+        "FROM e CROSS JOIN f GROUP BY k\n"
+      ]
+    },
+    {
+      "name": "ds_p6_clean",
+      "displayName": "Cleaning rules and rows changed (latest run)",
+      "queryLines": [
+        "WITH l AS (SELECT *, MAX(run_at) OVER (PARTITION BY target) AS last_run FROM workspace.dsmlc.cleaning_log),\n",
+        "src AS (SELECT 'silver_daily' AS target, COUNT(*) AS source_rows FROM workspace.dsmlc.bronze_daily\n",
+        "        UNION ALL SELECT 'silver_jobs', COUNT(*) FROM workspace.dsmlc.bronze_jobs\n",
+        "        UNION ALL SELECT 'silver_failures', COUNT(*) FROM workspace.dsmlc.bronze_failures)\n",
+        "SELECT l.rule, l.target AS table_name, l.rows_affected,\n",
+        "       ROUND(100 * l.rows_affected / s.source_rows, 3) AS share_of_table_pct\n",
+        "FROM l JOIN src s USING (target)\n",
+        "WHERE l.run_at = l.last_run AND l.rows_affected > 0\n",
+        "  AND l.rule NOT LIKE '%linked to a repair job%' AND l.rule NOT LIKE '%no repair job%'\n",
+        "  AND l.rule NOT LIKE '%(kept)%' AND l.rule NOT LIKE '%dropped%'\n"
+      ]
+    },
+    {
+      "name": "ba232594",
+      "displayName": "Budget Summary",
+      "queryLines": [
+        "SELECT\r\n",
+        "    scenario AS `Budget Scenario`,\r\n",
+        "    budget_wells AS `Wells Treated`,\r\n",
+        "    ROUND(action_cost_total, 0) AS `Total Budget Cost ($)`,\r\n",
+        "    wells_action_1 AS `Action 1 Wells`,\r\n",
+        "    wells_action_2 AS `Action 2 Wells`,\r\n",
+        "    ROUND(failures_per_well_year_expected, 2) AS `Expected Failures / Well-Yr`,\r\n",
+        "    ROUND(failures_per_well_year_measured, 2) AS `Measured Failures / Well-Yr`,\r\n",
+        "    expected_savings_per_year_25 AS `Expected Annual Savings @ 25% ($)`,\r\n",
+        "    measured_savings_per_year_25 AS `Measured Annual Savings @ 25% ($)`,\r\n",
+        "    ROUND(payback_years_measured_25, 2) AS `Measured Payback @ 25% (Years)`,\r\n",
+        "    expected_savings_per_year_50 AS `Expected Annual Savings @ 50% ($)`,\r\n",
+        "    measured_savings_per_year_50 AS `Measured Annual Savings @ 50% ($)`,\r\n",
+        "    ROUND(payback_years_measured_50, 2) AS `Measured Payback @ 50% (Years)`,\r\n",
+        "    -- Derived Year-1 Net Savings (Gross Savings - Total Action Cost) for KPI tiles / chart\r\n",
+        "    ROUND(expected_savings_per_year_25 - action_cost_total, 0) AS `Expected Year-1 Net Savings @ 25% ($)`,\r\n",
+        "    ROUND(expected_savings_per_year_50 - action_cost_total, 0) AS `Expected Year-1 Net Savings @ 50% ($)`,\r\n",
+        "    ROUND(measured_savings_per_year_25 - action_cost_total, 0) AS `Measured Year-1 Net Savings @ 25% ($)`,\r\n",
+        "    ROUND(measured_savings_per_year_50 - action_cost_total, 0) AS `Measured Year-1 Net Savings @ 50% ($)`,\r\n",
+        "    pick_window AS `Pick Window`,\r\n",
+        "    measure_window AS `Measure Window`\r\n",
+        "FROM workspace.dsmlc.gold_budget_scenarios\r\n",
+        "ORDER BY budget_wells;"
+      ]
+    },
+    {
+      "name": "35e45ef4",
+      "displayName": "Budget Wells",
+      "queryLines": [
+        "SELECT s.scenario AS `Budget Scenario`,\n",
+        "       s.budget_wells AS `Scenario Well Limit`,\n",
+        "       w.rank AS `Priority Rank`,\n",
+        "       w.uwi AS `UWI`,\n",
+        "       w.action AS `Recommended Action`,\n",
+        "       w.failures_pick AS `Historical Failures`,\n",
+        "       ROUND(w.expected_rate, 2) AS `Failures / Yr`,\n",
+        "       ROUND(w.failures_pick * w.cost_per_failure) AS `Historical Failure Cost ($)`,\n",
+        "       ROUND(0.25 * w.expected_value_per_year) AS `Expected Annual Savings @ 25% ($)`,\n",
+        "       ROUND(0.5 * w.expected_value_per_year) AS `Expected Annual Savings @ 50% ($)`\n",
+        "FROM workspace.dsmlc.gold_budget_scenarios s\n",
+        "JOIN workspace.dsmlc.gold_budget_wells w ON w.rank <= s.budget_wells\n",
+        "ORDER BY s.budget_wells, w.rank\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "p1",
+      "displayName": "Cost Drivers",
+      "layout": [
+        {
+          "widget": {
+            "name": "p1-subtitle",
+            "multilineTextboxSpec": {
+              "lines": [
+                "Rods fail most often, but pump and tubing failures cost the most per repair. Spend also concentrates in a few areas. Last 12 months = Oct 28, 2025 to Oct 27, 2026."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "p1-spend",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p1_kpis",
+                  "fields": [
+                    {
+                      "name": "sum(repair_cost_12m)",
+                      "expression": "SUM(`repair_cost_12m`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(repair_cost_12m)",
+                  "displayName": "Repair spend, last 12 months (C$)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Repair spend, last 12 months (C$)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p1-lost",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p1_kpis",
+                  "fields": [
+                    {
+                      "name": "sum(downhole_lost_oil_m3_12m)",
+                      "expression": "SUM(`downhole_lost_oil_m3_12m`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Downhole lost oil, last 12 months (m³)",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(downhole_lost_oil_m3_12m)",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  },
+                  "displayName": "Downhole lost oil, last 12 months (m³)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p1-lost-value",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p1_kpis",
+                  "fields": [
+                    {
+                      "name": "sum(downhole_lost_oil_value_12m)",
+                      "expression": "SUM(`downhole_lost_oil_value_12m`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(downhole_lost_oil_value_12m)",
+                  "displayName": "Value of that lost oil (C$, at C$32.50/boe)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Value of that lost oil (C$, at C$32.50/boe)"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p1-loss-month",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p1_loss_month",
+                  "fields": [
+                    {
+                      "name": "downtime_bucket",
+                      "expression": "`downtime_bucket`"
+                    },
+                    {
+                      "name": "month",
+                      "expression": "`month`"
+                    },
+                    {
+                      "name": "sum(lost_oil_m3)",
+                      "expression": "SUM(`lost_oil_m3`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Lost oil by cause, by month (economic shut-ins excluded)",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "month",
+                  "axis": {
+                    "hideTitle": true
+                  },
+                  "displayName": "Month",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(lost_oil_m3)",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  },
+                  "displayName": "Lost oil (m³)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "downtime_bucket",
+                  "legend": {
+                    "position": "bottom"
+                  },
+                  "displayName": "Cause",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 8,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p1-type-share",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p1_type_share",
+                  "fields": [
+                    {
+                      "name": "failure_type",
+                      "expression": "`failure_type`"
+                    },
+                    {
+                      "name": "share_of_failures_pct",
+                      "expression": "`share_of_failures_pct`"
+                    },
+                    {
+                      "name": "share_of_repair_cost_pct",
+                      "expression": "`share_of_repair_cost_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Share of failures vs. repair cost by failure type (%)",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "mark": {
+                "layout": "group"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "failure_type",
+                  "axis": {
+                    "hideTitle": true
+                  },
+                  "displayName": "Failure type",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "fields": [
+                    {
+                      "fieldName": "share_of_failures_pct",
+                      "displayName": "% of failures"
+                    },
+                    {
+                      "fieldName": "share_of_repair_cost_pct",
+                      "displayName": "% of repair cost"
+                    }
+                  ]
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 3,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p1-repair-area",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p1_repair_area",
+                  "fields": [
+                    {
+                      "name": "job_category",
+                      "expression": "`job_category`"
+                    },
+                    {
+                      "name": "sum(repair_cost)",
+                      "expression": "SUM(`repair_cost`)"
+                    },
+                    {
+                      "name": "field_operating_area",
+                      "expression": "`field_operating_area`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Repair spend concentrates in a few areas (last 12 months, C$)",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "sum(repair_cost)",
+                  "displayName": "Repair spend (C$)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "field_operating_area",
+                  "displayName": "Area",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "job_category",
+                  "displayName": "Job type",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 12,
+            "height": 7
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "p2",
+      "displayName": "Recurrence Analysis",
+      "layout": [
+        {
+          "widget": {
+            "name": "p2-subtitle",
+            "multilineTextboxSpec": {
+              "lines": [
+                "More than half of failures are followed by another on the same well within 90 days. Rod failures come back two times in three. Failure log is reliable from Jun 2025."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "p2-all",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p2_counters",
+                  "fields": [
+                    {
+                      "name": "refail_90d_all_pct",
+                      "expression": "`refail_90d_all_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "refail_90d_all_pct",
+                  "displayName": "Failures followed by another within 90 days (%)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Failures followed by another within 90 days (%)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p2-rods",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p2_counters",
+                  "fields": [
+                    {
+                      "name": "refail_90d_rods_pct",
+                      "expression": "`refail_90d_rods_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "refail_90d_rods_pct",
+                  "displayName": "Rod failures that repeat within 90 days (%)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Rod failures that repeat within 90 days (%)"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p2-pt",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p2_counters",
+                  "fields": [
+                    {
+                      "name": "refail_90d_pump_tubing_pct",
+                      "expression": "`refail_90d_pump_tubing_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "refail_90d_pump_tubing_pct",
+                  "displayName": "Pump and tubing failures that repeat within 90 days (%)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Pump and tubing failures that repeat within 90 days (%)"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p2-refail-type",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p2_refail_type",
+                  "fields": [
+                    {
+                      "name": "failure_group",
+                      "expression": "`failure_group`"
+                    },
+                    {
+                      "name": "days_since_failure",
+                      "expression": "`days_since_failure`"
+                    },
+                    {
+                      "name": "share_repeated_pct",
+                      "expression": "`share_repeated_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Share of failures repeated by days since failure (%)"
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "days_since_failure",
+                  "displayName": "Days since failure",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "share_repeated_pct",
+                  "displayName": "Repeated (%)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "failure_group",
+                  "displayName": "Failure group",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p2-gap",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p2_gap",
+                  "fields": [
+                    {
+                      "name": "failure_kind",
+                      "expression": "`failure_kind`"
+                    },
+                    {
+                      "name": "month",
+                      "expression": "`month`"
+                    },
+                    {
+                      "name": "sum(failures)",
+                      "expression": "SUM(`failures`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "First-time vs repeat failures per month",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "month",
+                  "axis": {
+                    "hideTitle": true
+                  },
+                  "displayName": "Month",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(failures)",
+                  "displayName": "Failures",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "failure_kind",
+                  "legend": {
+                    "position": "bottom"
+                  },
+                  "displayName": "Failure kind",
+                  "scale": {
+                    "mappings": [
+                      {
+                        "color": "#94A3B8",
+                        "value": "First failure, or over 90 days since the last"
+                      },
+                      {
+                        "color": "#C2410C",
+                        "value": "Repeat (within 90 days of the last failure)"
+                      }
+                    ],
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p2-monthly",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p2_monthly",
+                  "fields": [
+                    {
+                      "name": "failure_type",
+                      "expression": "`failure_type`"
+                    },
+                    {
+                      "name": "month",
+                      "expression": "`month`"
+                    },
+                    {
+                      "name": "sum(failures)",
+                      "expression": "SUM(`failures`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Failures per month by type",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "month",
+                  "axis": {
+                    "hideTitle": true
+                  },
+                  "displayName": "Month",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(failures)",
+                  "displayName": "Failures",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "failure_type",
+                  "displayName": "Type",
+                  "scale": {
+                    "type": "categorical",
+                    "mappings": [
+                      {
+                        "value": "Tubing",
+                        "color": {
+                          "themeColorType": "visualizationColors",
+                          "position": 8
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 9,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p2-chronic",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p2_chronic",
+                  "fields": [
+                    {
+                      "name": "failures_per_well",
+                      "expression": "`failures_per_well`"
+                    },
+                    {
+                      "name": "share_of_wells_pct",
+                      "expression": "`share_of_wells_pct`"
+                    },
+                    {
+                      "name": "share_of_failures_pct",
+                      "expression": "`share_of_failures_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Share of wells and failures by failures per well (%)",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "mark": {
+                "colors": [
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 1
+                  },
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 8
+                  }
+                ],
+                "layout": "group"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "failures_per_well",
+                  "displayName": "Failures per well since Jun 2025",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "fields": [
+                    {
+                      "fieldName": "share_of_wells_pct",
+                      "displayName": "% of wells"
+                    },
+                    {
+                      "fieldName": "share_of_failures_pct",
+                      "displayName": "% of failures"
+                    }
+                  ]
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 9,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p2-prediction",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p2_tier",
+                  "fields": [
+                    {
+                      "name": "tier",
+                      "expression": "`tier`"
+                    },
+                    {
+                      "name": "p_fail_next_90d_pct",
+                      "expression": "`p_fail_next_90d_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": "Chance of failure in the next 90 days by recent failures (%)"
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "tier",
+                  "displayName": "Failures in the last 90 days",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "custom-order",
+                      "orderedValues": [
+                        "0",
+                        "1",
+                        "2",
+                        "3+"
+                      ]
+                    }
+                  }
+                },
+                "y": {
+                  "fieldName": "p_fail_next_90d_pct",
+                  "displayName": "Fail again within 90 days (%)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "tier",
+                  "scale": {
+                    "mappings": [
+                      {
+                        "color": "#E5E7EB",
+                        "value": "0"
+                      },
+                      {
+                        "color": "#FDBA74",
+                        "value": "1"
+                      },
+                      {
+                        "color": "#EA580C",
+                        "value": "2"
+                      },
+                      {
+                        "color": "#9A3412",
+                        "value": "3+"
+                      }
+                    ],
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 4,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "p3",
+      "displayName": "Work Order Priorities",
+      "layout": [
+        {
+          "widget": {
+            "name": "p3-subtitle",
+            "multilineTextboxSpec": {
+              "lines": [
+                "Wells with two or more failures in the last 90 days are the watchlist (64% fail again within 90 days). The list is sorted by recent failures, then by 12-month cost. Data as of Oct 27, 2026."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "p3-watch",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p3_list",
+                  "fields": [
+                    {
+                      "name": "sum(on_watchlist)",
+                      "expression": "SUM(`on_watchlist`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(on_watchlist)",
+                  "displayName": "Wells on the watchlist (2+ failures)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Wells on the watchlist (2+ failures)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p3-three",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p3_list",
+                  "fields": [
+                    {
+                      "name": "sum(three_plus)",
+                      "expression": "SUM(`three_plus`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(three_plus)",
+                  "displayName": "Wells with 3+ failures"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Wells with 3+ failures"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p3-cost",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p3_list",
+                  "fields": [
+                    {
+                      "name": "sum(watchlist_repair_cost_12m)",
+                      "expression": "SUM(`watchlist_repair_cost_12m`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(watchlist_repair_cost_12m)",
+                  "displayName": "Repair cost on watchlist wells, last 12 months (C$)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Repair cost on watchlist wells, last 12 months (C$)"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p3-area",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p3_list",
+                  "fields": [
+                    {
+                      "name": "recency_tier",
+                      "expression": "`recency_tier`"
+                    },
+                    {
+                      "name": "count(uwi)",
+                      "expression": "COUNT(`uwi`)"
+                    },
+                    {
+                      "name": "field_operating_area",
+                      "expression": "`field_operating_area`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Where wells with a recent failure sit, by failures in the last 90 days",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "count(uwi)",
+                  "displayName": "Wells",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "field_operating_area",
+                  "displayName": "Area",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "x-reversed"
+                    }
+                  }
+                },
+                "color": {
+                  "fieldName": "recency_tier",
+                  "displayName": "Recent failures",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 12,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p3-list",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p3_list",
+                  "fields": [
+                    {
+                      "name": "priority_rank",
+                      "expression": "`priority_rank`"
+                    },
+                    {
+                      "name": "uwi",
+                      "expression": "`uwi`"
+                    },
+                    {
+                      "name": "well_name",
+                      "expression": "`well_name`"
+                    },
+                    {
+                      "name": "field_operating_area",
+                      "expression": "`field_operating_area`"
+                    },
+                    {
+                      "name": "facility_name",
+                      "expression": "`facility_name`"
+                    },
+                    {
+                      "name": "pump_make",
+                      "expression": "`pump_make`"
+                    },
+                    {
+                      "name": "recency_tier",
+                      "expression": "`recency_tier`"
+                    },
+                    {
+                      "name": "failures_last_90d",
+                      "expression": "`failures_last_90d`"
+                    },
+                    {
+                      "name": "last_failure_type",
+                      "expression": "`last_failure_type`"
+                    },
+                    {
+                      "name": "last_failure_date",
+                      "expression": "`last_failure_date`"
+                    },
+                    {
+                      "name": "days_since_last_failure",
+                      "expression": "`days_since_last_failure`"
+                    },
+                    {
+                      "name": "repair_cost_12m",
+                      "expression": "`repair_cost_12m`"
+                    },
+                    {
+                      "name": "downhole_lost_oil_m3_12m",
+                      "expression": "`downhole_lost_oil_m3_12m`"
+                    },
+                    {
+                      "name": "cost_12m",
+                      "expression": "`cost_12m`"
+                    },
+                    {
+                      "name": "suggested_action",
+                      "expression": "`suggested_action`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Ranked work list (sort by Rank)",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "priority_rank",
+                    "displayName": "Rank"
+                  },
+                  {
+                    "fieldName": "uwi",
+                    "useForSearch": true,
+                    "displayName": "UWI"
+                  },
+                  {
+                    "fieldName": "well_name",
+                    "displayName": "Well"
+                  },
+                  {
+                    "fieldName": "field_operating_area",
+                    "displayName": "Area"
+                  },
+                  {
+                    "fieldName": "facility_name",
+                    "displayName": "Facility"
+                  },
+                  {
+                    "fieldName": "pump_make",
+                    "displayName": "Pump make"
+                  },
+                  {
+                    "fieldName": "recency_tier",
+                    "displayName": "Tier"
+                  },
+                  {
+                    "fieldName": "failures_last_90d",
+                    "displayName": "Failures, last 90 days"
+                  },
+                  {
+                    "fieldName": "last_failure_type",
+                    "displayName": "Last failure"
+                  },
+                  {
+                    "fieldName": "last_failure_date",
+                    "displayName": "Last failure date"
+                  },
+                  {
+                    "fieldName": "days_since_last_failure",
+                    "displayName": "Days since"
+                  },
+                  {
+                    "fieldName": "repair_cost_12m",
+                    "displayName": "Repair cost, 12 months (C$)"
+                  },
+                  {
+                    "fieldName": "downhole_lost_oil_m3_12m",
+                    "displayName": "Lost oil, 12 months (m³)"
+                  },
+                  {
+                    "fieldName": "cost_12m",
+                    "displayName": "Cost incl. lost oil, 12 months (C$)"
+                  },
+                  {
+                    "fieldName": "suggested_action",
+                    "displayName": "Suggested action"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 12,
+            "height": 10
+          }
+        },
+        {
+          "widget": {
+            "name": "p3-alerts",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p3_alerts",
+                  "fields": [
+                    {
+                      "name": "alert_date",
+                      "expression": "`alert_date`"
+                    },
+                    {
+                      "name": "well_name",
+                      "expression": "`well_name`"
+                    },
+                    {
+                      "name": "field_operating_area",
+                      "expression": "`field_operating_area`"
+                    },
+                    {
+                      "name": "partial_days_last_7",
+                      "expression": "`partial_days_last_7`"
+                    },
+                    {
+                      "name": "failures_last_90d",
+                      "expression": "`failures_last_90d`"
+                    },
+                    {
+                      "name": "on_watchlist",
+                      "expression": "`on_watchlist`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "alert_date",
+                    "displayName": "Alert date"
+                  },
+                  {
+                    "fieldName": "well_name",
+                    "displayName": "Well"
+                  },
+                  {
+                    "fieldName": "field_operating_area",
+                    "displayName": "Area"
+                  },
+                  {
+                    "fieldName": "partial_days_last_7",
+                    "displayName": "Partial-run days, last 7"
+                  },
+                  {
+                    "fieldName": "failures_last_90d",
+                    "displayName": "Failures, last 90 days"
+                  },
+                  {
+                    "fieldName": "on_watchlist",
+                    "displayName": "Also on watchlist"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Runtime alerts in the last 14 days (2+ partial-run days in a week; 17% are followed by a failure within 2-30 days)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 19,
+            "width": 12,
+            "height": 6
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "p4",
+      "displayName": "Return on Action",
+      "layout": [
+        {
+          "widget": {
+            "name": "p4-subtitle",
+            "multilineTextboxSpec": {
+              "lines": [
+                "Two actions are tested on the wells they fit, with a range because we cannot prove how many failures they avoid."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "p4-fast50",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p4_kpi",
+                  "fields": [
+                    {
+                      "name": "fastest_payback_50_years",
+                      "expression": "`fastest_payback_50_years`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "fastest_payback_50_years",
+                  "displayName": "Fastest payback if 50% of failures are avoided (years)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Fastest payback if 50% of failures are avoided (years)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p4-fast25",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p4_kpi",
+                  "fields": [
+                    {
+                      "name": "fastest_payback_25_years",
+                      "expression": "`fastest_payback_25_years`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Fastest payback if 25% are avoided (years)",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "fastest_payback_25_years",
+                  "displayName": "Fastest payback if 25% are avoided (years)"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p4-wells",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p4_kpi",
+                  "fields": [
+                    {
+                      "name": "bad_actor_wells",
+                      "expression": "`bad_actor_wells`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "bad_actor_wells",
+                  "displayName": "Bad-actor wells the two actions target"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Bad-actor wells the two actions target"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p4-savings",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p4_actions",
+                  "fields": [
+                    {
+                      "name": "action",
+                      "expression": "`action`"
+                    },
+                    {
+                      "name": "savings_25",
+                      "expression": "`savings_25`"
+                    },
+                    {
+                      "name": "savings_50",
+                      "expression": "`savings_50`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Yearly savings per bad-actor well against a one-off C$34,152 action",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "mark": {
+                "colors": [
+                  null,
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 8
+                  }
+                ],
+                "layout": "group"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "action",
+                  "axis": {
+                    "labelAngle": 0
+                  },
+                  "displayName": "Action",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "fields": [
+                    {
+                      "fieldName": "savings_25",
+                      "displayName": "25% fewer failures (C$/yr)"
+                    },
+                    {
+                      "fieldName": "savings_50",
+                      "displayName": "50% fewer failures (C$/yr)"
+                    }
+                  ],
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  },
+                  "axis": {
+                    "hideTitle": true
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p4-breakeven",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p4_actions",
+                  "fields": [
+                    {
+                      "name": "action",
+                      "expression": "`action`"
+                    },
+                    {
+                      "name": "bad_actor_wells",
+                      "expression": "`bad_actor_wells`"
+                    },
+                    {
+                      "name": "failures_per_well_year",
+                      "expression": "`failures_per_well_year`"
+                    },
+                    {
+                      "name": "mean_cost_per_failure",
+                      "expression": "`mean_cost_per_failure`"
+                    },
+                    {
+                      "name": "failures_to_recover_cost",
+                      "expression": "`failures_to_recover_cost`"
+                    },
+                    {
+                      "name": "payback_25_years",
+                      "expression": "`payback_25_years`"
+                    },
+                    {
+                      "name": "payback_50_years",
+                      "expression": "`payback_50_years`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Break-even per action (base case)",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "action",
+                    "displayName": "Action"
+                  },
+                  {
+                    "fieldName": "bad_actor_wells",
+                    "displayName": "Bad-actor wells"
+                  },
+                  {
+                    "fieldName": "failures_per_well_year",
+                    "displayName": "Failures/yr after picking"
+                  },
+                  {
+                    "fieldName": "mean_cost_per_failure",
+                    "displayName": "Mean cost per failure (C$)"
+                  },
+                  {
+                    "fieldName": "failures_to_recover_cost",
+                    "displayName": "Failures to avoid to pay back"
+                  },
+                  {
+                    "fieldName": "payback_25_years",
+                    "displayName": "Payback at 25% (yrs)"
+                  },
+                  {
+                    "fieldName": "payback_50_years",
+                    "displayName": "Payback at 50% (yrs)"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "p4-grid",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p4_grid",
+                  "fields": [
+                    {
+                      "name": "action",
+                      "expression": "`action`"
+                    },
+                    {
+                      "name": "netback_cad_per_bbl",
+                      "expression": "`netback_cad_per_bbl`"
+                    },
+                    {
+                      "name": "action_cost",
+                      "expression": "`action_cost`"
+                    },
+                    {
+                      "name": "avoided_share_pct",
+                      "expression": "`avoided_share_pct`"
+                    },
+                    {
+                      "name": "mean_cost_per_failure",
+                      "expression": "`mean_cost_per_failure`"
+                    },
+                    {
+                      "name": "annual_savings_per_well",
+                      "expression": "`annual_savings_per_well`"
+                    },
+                    {
+                      "name": "payback_years",
+                      "expression": "`payback_years`"
+                    }
+                  ],
+                  "disaggregated": true,
+                  "orders": [
+                    {
+                      "direction": "DESC",
+                      "expression": "`annual_savings_per_well`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Sensitivity: netback ±25%, action cost ×0.5 / ×1 / ×2, 25% or 50% fewer failures",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "action",
+                    "displayName": "Action"
+                  },
+                  {
+                    "fieldName": "netback_cad_per_bbl",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 2
+                      },
+                      "hideGroupSeparator": true
+                    },
+                    "contentAlignment": "center",
+                    "displayName": "Netback (C$/bbl)"
+                  },
+                  {
+                    "fieldName": "action_cost",
+                    "contentAlignment": "center",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 2
+                      },
+                      "hideGroupSeparator": false
+                    },
+                    "displayName": "Action cost (C$)"
+                  },
+                  {
+                    "fieldName": "avoided_share_pct",
+                    "contentAlignment": "center",
+                    "displayName": "Failures avoided (%)"
+                  },
+                  {
+                    "fieldName": "mean_cost_per_failure",
+                    "contentAlignment": "center",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 2
+                      },
+                      "hideGroupSeparator": false
+                    },
+                    "displayName": "Cost per failure (C$)"
+                  },
+                  {
+                    "fieldName": "annual_savings_per_well",
+                    "contentAlignment": "center",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 2
+                      },
+                      "hideGroupSeparator": false
+                    },
+                    "displayName": "Savings per well (C$/yr)"
+                  },
+                  {
+                    "fieldName": "payback_years",
+                    "contentAlignment": "center",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 1
+                      },
+                      "hideGroupSeparator": true
+                    },
+                    "displayName": "Payback (yrs; green ≤ 2)",
+                    "style": {
+                      "rules": [
+                        {
+                          "condition": {
+                            "operator": "<=",
+                            "operand": {
+                              "type": "data-value",
+                              "value": "2"
+                            }
+                          },
+                          "color": "#00A972"
+                        },
+                        {
+                          "condition": {
+                            "operator": ">",
+                            "operand": {
+                              "type": "data-value",
+                              "value": "2"
+                            }
+                          },
+                          "color": "#E92828"
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "rowOrder": [
+                  {
+                    "by": "column-reversed",
+                    "field": {
+                      "index": 5
+                    }
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 12,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "p4-cost",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p4_cost",
+                  "fields": [
+                    {
+                      "name": "failure_type",
+                      "expression": "`failure_type`"
+                    },
+                    {
+                      "name": "mean_repair_cost",
+                      "expression": "`mean_repair_cost`"
+                    },
+                    {
+                      "name": "mean_lost_oil_value",
+                      "expression": "`mean_lost_oil_value`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Mean cost per failure, since Jun 2025 (C$)",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "mark": {
+                "colors": [
+                  null,
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 8
+                  }
+                ],
+                "layout": "stack"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "failure_type",
+                  "displayName": "Failure type",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "fields": [
+                    {
+                      "fieldName": "mean_repair_cost",
+                      "displayName": "Repair job (C$)"
+                    },
+                    {
+                      "fieldName": "mean_lost_oil_value",
+                      "displayName": "Lost oil (C$)"
+                    }
+                  ],
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "none",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 0
+                    }
+                  },
+                  "axis": {
+                    "hideTitle": true
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 3,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p4-cost-table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p4_cost",
+                  "fields": [
+                    {
+                      "name": "failure_type",
+                      "expression": "`failure_type`"
+                    },
+                    {
+                      "name": "failures",
+                      "expression": "`failures`"
+                    },
+                    {
+                      "name": "mean_cost_per_failure",
+                      "expression": "`mean_cost_per_failure`"
+                    },
+                    {
+                      "name": "median_cost_per_failure",
+                      "expression": "`median_cost_per_failure`"
+                    },
+                    {
+                      "name": "total_cost",
+                      "expression": "`total_cost`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Cost per failure by type",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "failure_type",
+                    "contentAlignment": "left",
+                    "displayName": "Type"
+                  },
+                  {
+                    "fieldName": "failures",
+                    "contentAlignment": "center",
+                    "displayName": "Failures"
+                  },
+                  {
+                    "fieldName": "mean_cost_per_failure",
+                    "contentAlignment": "center",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 2
+                      },
+                      "hideGroupSeparator": false
+                    },
+                    "displayName": "Mean cost (C$)"
+                  },
+                  {
+                    "fieldName": "median_cost_per_failure",
+                    "contentAlignment": "center",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 2
+                      },
+                      "hideGroupSeparator": false
+                    },
+                    "displayName": "Median cost (C$)"
+                  },
+                  {
+                    "fieldName": "total_cost",
+                    "contentAlignment": "center",
+                    "format": {
+                      "type": "number-plain",
+                      "abbreviation": "none",
+                      "decimalPlaces": {
+                        "type": "exact",
+                        "places": 2
+                      },
+                      "hideGroupSeparator": false
+                    },
+                    "displayName": "Total (C$)"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 12,
+            "width": 12,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "p4-budget",
+            "spec": {
+              "widgetType": "text",
+              "version": 1,
+              "encodings": {
+                "text": {
+                  "lines": [
+                    "**Budget scenarios**: which wells to treat for 25 / 50 / 100 / 200-well budgets."
+                  ],
+                  "fields": []
+                }
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 22,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "p4-inputs",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**Inputs and where they come from.** Netback C$32.50 per boe from Strathcona Q3 2026 operating earnings (company-wide). Repair cost uses field estimates, not invoices; a repair job shared by two failures is split between them. Lost oil counts from the day the well stopped. Bad actors are picked on Jun–Dec 2025 failures and their rate is measured on Jan–Oct 2026. Action cost is assumed from the 2023+ Workover median because no regional price was found. Avoided shares of 25% and 50% are assumptions bracketing one vendor case (~34%); action effects are associations, not proven causes."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 35,
+            "width": 12,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "wells-treated",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ba232594",
+                  "fields": [
+                    {
+                      "name": "sum(Total Budget Cost ($))",
+                      "expression": "SUM(`Total Budget Cost ($)`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Total Budget Cost ($)",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(Total Budget Cost ($))",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 23,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "fef63e69",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ba232594",
+                  "fields": [
+                    {
+                      "name": "sum(Measured Annual Savings @ 50% ($))",
+                      "expression": "SUM(`Measured Annual Savings @ 50% ($)`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Measured Annual Savings @ 50% ($)",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(Measured Annual Savings @ 50% ($))",
+                  "format": {
+                    "type": "number-currency",
+                    "currencyCode": "USD",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 23,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "c9851fa3",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ba232594",
+                  "fields": [
+                    {
+                      "name": "sum(Measured Annual Savings @ 25% ($))",
+                      "expression": "SUM(`Measured Annual Savings @ 25% ($)`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Measured Annual Savings @ 25% ($)",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(Measured Annual Savings @ 25% ($))",
+                  "format": {
+                    "type": "number-plain",
+                    "abbreviation": "compact",
+                    "decimalPlaces": {
+                      "type": "max",
+                      "places": 2
+                    }
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 5,
+            "y": 23,
+            "width": 3,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "b9a5763b",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ba232594",
+                  "fields": [
+                    {
+                      "name": "sum(Measured Payback @ 50% (Years))",
+                      "expression": "SUM(`Measured Payback @ 50% (Years)`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Measured Payback @ 50% (Years)",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(Measured Payback @ 50% (Years))"
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 23,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "treated-bad-actor-wells-selected-budget-scenario-ranked-shrunke",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "35e45ef4",
+                  "fields": [
+                    {
+                      "name": "Priority Rank",
+                      "expression": "`Priority Rank`"
+                    },
+                    {
+                      "name": "UWI",
+                      "expression": "`UWI`"
+                    },
+                    {
+                      "name": "Recommended Action",
+                      "expression": "`Recommended Action`"
+                    },
+                    {
+                      "name": "Historical Failures",
+                      "expression": "`Historical Failures`"
+                    },
+                    {
+                      "name": "Failures / Yr",
+                      "expression": "`Failures / Yr`"
+                    },
+                    {
+                      "name": "Historical Failure Cost ($)",
+                      "expression": "`Historical Failure Cost ($)`"
+                    },
+                    {
+                      "name": "Expected Annual Savings @ 25% ($)",
+                      "expression": "`Expected Annual Savings @ 25% ($)`"
+                    },
+                    {
+                      "name": "Expected Annual Savings @ 50% ($)",
+                      "expression": "`Expected Annual Savings @ 50% ($)`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Treated Bad-Actor Wells in Selected Budget Scenario (Ranked by Shrunken Return per Dollar)",
+                  "fields": []
+                }
+              },
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "Priority Rank"
+                  },
+                  {
+                    "fieldName": "UWI"
+                  },
+                  {
+                    "fieldName": "Recommended Action"
+                  },
+                  {
+                    "fieldName": "Historical Failures"
+                  },
+                  {
+                    "fieldName": "Failures / Yr"
+                  },
+                  {
+                    "fieldName": "Historical Failure Cost ($)"
+                  },
+                  {
+                    "fieldName": "Expected Annual Savings @ 25% ($)"
+                  },
+                  {
+                    "fieldName": "Expected Annual Savings @ 50% ($)"
+                  }
+                ]
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 26,
+            "width": 12,
+            "height": 9
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "p5",
+      "displayName": "Sensitivity Check",
+      "layout": [
+        {
+          "widget": {
+            "name": "p5-subtitle",
+            "multilineTextboxSpec": {
+              "lines": [
+                "Wells are ranked on 2023-24 history plus Mar-May 2025 repairs and tested on Jun 2025 to Oct 2026 cost. A sensor rule only counts if it beats the simple recency watchlist."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "p5-capture",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p5_kpi",
+                  "fields": [
+                    {
+                      "name": "capture_10_pct",
+                      "expression": "`capture_10_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "capture_10_pct",
+                  "displayName": "Later cost caught by the top 10% of wells (%, 95% CI 14.3-19.9)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Later cost caught by the top 10% of wells (%, 95% CI 14.3-19.9)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p5-lift",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p5_kpi",
+                  "fields": [
+                    {
+                      "name": "lift_vs_random",
+                      "expression": "`lift_vs_random`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "lift_vs_random",
+                  "displayName": "Lift vs random"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Lift vs random"
+              }
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p5-persist",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p5_kpi",
+                  "fields": [
+                    {
+                      "name": "persistence_pct",
+                      "expression": "`persistence_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "persistence_pct",
+                  "displayName": "Top-10% wells still top 10% later (%)"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Top-10% wells still top 10% later (%)"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p5-curve",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p5_curve",
+                  "fields": [
+                    {
+                      "name": "share_targeted_pct",
+                      "expression": "`share_targeted_pct`"
+                    },
+                    {
+                      "name": "ranker",
+                      "expression": "`ranker`"
+                    },
+                    {
+                      "name": "share_captured_pct",
+                      "expression": "`share_captured_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "share_targeted_pct",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Share of wells targeted (%)"
+                },
+                "y": {
+                  "fieldName": "share_captured_pct",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Share of later cost captured (%)"
+                },
+                "color": {
+                  "fieldName": "ranker",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Ranking"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Ranking with recent repairs edges out size; neither clearly wins"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 8,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p5-watch",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p5_watch",
+                  "fields": [
+                    {
+                      "name": "flag",
+                      "expression": "`flag`"
+                    },
+                    {
+                      "name": "precision_pct",
+                      "expression": "`precision_pct`"
+                    },
+                    {
+                      "name": "recall_pct",
+                      "expression": "`recall_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Recency watchlist: the baseline sensor rules must beat",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "mark": {
+                "colors": [
+                  null,
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 10
+                  }
+                ],
+                "layout": "group"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "flag",
+                  "axis": {
+                    "labelAngle": 0
+                  },
+                  "displayName": "Watchlist rule",
+                  "scale": {
+                    "type": "categorical",
+                    "sort": {
+                      "by": "y-reversed"
+                    }
+                  }
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "fields": [
+                    {
+                      "fieldName": "precision_pct",
+                      "displayName": "Precision (%)"
+                    },
+                    {
+                      "fieldName": "recall_pct",
+                      "displayName": "Recall (%)"
+                    }
+                  ],
+                  "axis": {
+                    "hideTitle": true
+                  }
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 8,
+            "y": 3,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p5-rules",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p5_rules",
+                  "fields": [
+                    {
+                      "name": "rule_name",
+                      "expression": "`rule_name`"
+                    },
+                    {
+                      "name": "precision_pct",
+                      "expression": "`precision_pct`"
+                    },
+                    {
+                      "name": "recall_pct",
+                      "expression": "`recall_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "The runtime rule does not beat the watchlist on precision, but adds recall (2026)",
+                  "fields": []
+                }
+              },
+              "version": 3,
+              "mark": {
+                "colors": [
+                  null,
+                  {
+                    "themeColorType": "visualizationColors",
+                    "position": 10
+                  }
+                ],
+                "layout": "group"
+              },
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "rule_name",
+                  "axis": {
+                    "labelAngle": 0,
+                    "hideTitle": true
+                  },
+                  "displayName": "Rule",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "fields": [
+                    {
+                      "fieldName": "precision_pct",
+                      "displayName": "Precision (%)"
+                    },
+                    {
+                      "fieldName": "recall_pct",
+                      "displayName": "Recall (%)"
+                    }
+                  ],
+                  "axis": {
+                    "hideLabels": false,
+                    "hideTitle": true
+                  }
+                },
+                "label": {
+                  "show": false
+                }
+              },
+              "data": {
+                "queryName": "main_query"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 9,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p5-rules-table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p5_rules",
+                  "fields": [
+                    {
+                      "name": "rule_name",
+                      "expression": "`rule_name`"
+                    },
+                    {
+                      "name": "alerts",
+                      "expression": "`alerts`"
+                    },
+                    {
+                      "name": "precision_pct",
+                      "expression": "`precision_pct`"
+                    },
+                    {
+                      "name": "recall_pct",
+                      "expression": "`recall_pct`"
+                    },
+                    {
+                      "name": "failures_caught",
+                      "expression": "`failures_caught`"
+                    },
+                    {
+                      "name": "label_failures",
+                      "expression": "`label_failures`"
+                    },
+                    {
+                      "name": "alerts_per_area_week",
+                      "expression": "`alerts_per_area_week`"
+                    },
+                    {
+                      "name": "median_lead_days",
+                      "expression": "`median_lead_days`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "rule_name",
+                    "displayName": "Rule"
+                  },
+                  {
+                    "fieldName": "alerts",
+                    "displayName": "Alerts"
+                  },
+                  {
+                    "fieldName": "precision_pct",
+                    "displayName": "Precision (%)"
+                  },
+                  {
+                    "fieldName": "recall_pct",
+                    "displayName": "Recall (%)"
+                  },
+                  {
+                    "fieldName": "failures_caught",
+                    "displayName": "Failures caught"
+                  },
+                  {
+                    "fieldName": "label_failures",
+                    "displayName": "Failures"
+                  },
+                  {
+                    "fieldName": "alerts_per_area_week",
+                    "displayName": "Alerts per area-week"
+                  },
+                  {
+                    "fieldName": "median_lead_days",
+                    "displayName": "Median warning (days)"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Early-warning test on Jan–Oct 2026 (rule frozen on 2025)"
+              }
+            }
+          },
+          "position": {
+            "x": 6,
+            "y": 9,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "p5-rules-note",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**How to read the early-warning test.** Rule frozen on Jun–Dec 2025: alert when a producing well has 2+ partial-run days in a week (down-day and efficiency rules did not add precision). An alert is a hit if the well stops for a rod, pump or tubing failure 2–30 days later; one alert per well per 14 days. Recommendation: lead with the recency watchlist; add the runtime rule if crews can handle about 9 alerts per area per week, which lifts failures caught from 500 to 813 of 1,432."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 12,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "p6",
+      "displayName": "Data Quality",
+      "layout": [
+        {
+          "widget": {
+            "name": "p6-subtitle",
+            "multilineTextboxSpec": {
+              "lines": [
+                "We cleaned the raw files, logged every rule, and list what the data cannot tell us."
+              ]
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 12,
+            "height": 1
+          }
+        },
+        {
+          "widget": {
+            "name": "p6-rows",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p6_clean",
+                  "fields": [
+                    {
+                      "name": "sum(rows_affected)",
+                      "expression": "SUM(`rows_affected`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "sum(rows_affected)",
+                  "displayName": "Rows changed by cleaning rules"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Rows changed by cleaning rules"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 1,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p6-limits",
+            "multilineTextboxSpec": {
+              "lines": [
+                "**What this data cannot tell us.** The failure log starts in Jun 2025. Rod truck cost is missing before 2023. Costs are field estimates, not invoiced costs. Lost oil is an operator estimate. Torque and current repeat day to day (manual entries). The netback is company-wide, not heavy-oil only. Action effects are associations, not proven causes."
+              ]
+            }
+          },
+          "position": {
+            "x": 4,
+            "y": 1,
+            "width": 8,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "p6-rules",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p6_clean",
+                  "fields": [
+                    {
+                      "name": "rule",
+                      "expression": "`rule`"
+                    },
+                    {
+                      "name": "rows_affected",
+                      "expression": "`rows_affected`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "rows_affected",
+                  "scale": {
+                    "type": "quantitative"
+                  },
+                  "displayName": "Rows affected"
+                },
+                "y": {
+                  "fieldName": "rule",
+                  "scale": {
+                    "type": "categorical"
+                  },
+                  "displayName": "Rule"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Where cleaning changed the most rows"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 3,
+            "width": 12,
+            "height": 7
+          }
+        },
+        {
+          "widget": {
+            "name": "p6-log",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "ds_p6_clean",
+                  "fields": [
+                    {
+                      "name": "rule",
+                      "expression": "`rule`"
+                    },
+                    {
+                      "name": "table_name",
+                      "expression": "`table_name`"
+                    },
+                    {
+                      "name": "rows_affected",
+                      "expression": "`rows_affected`"
+                    },
+                    {
+                      "name": "share_of_table_pct",
+                      "expression": "`share_of_table_pct`"
+                    }
+                  ],
+                  "disaggregated": true
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "rule",
+                    "displayName": "Rule"
+                  },
+                  {
+                    "fieldName": "table_name",
+                    "displayName": "Table"
+                  },
+                  {
+                    "fieldName": "rows_affected",
+                    "displayName": "Rows affected"
+                  },
+                  {
+                    "fieldName": "share_of_table_pct",
+                    "displayName": "Share of source rows (%)"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Cleaning log (latest run)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 10,
+            "width": 12,
+            "height": 7
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layoutVersion": "GRID_V1"
+    },
+    {
+      "name": "filters",
+      "displayName": "Filters",
+      "layout": [
+        {
+          "widget": {
+            "name": "filter-area",
+            "queries": [
+              {
+                "name": "q_ds_p1_kpis_area",
+                "query": {
+                  "datasetName": "ds_p1_kpis",
+                  "fields": [
+                    {
+                      "name": "field_operating_area",
+                      "expression": "`field_operating_area`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "q_ds_p1_loss_month_area",
+                "query": {
+                  "datasetName": "ds_p1_loss_month",
+                  "fields": [
+                    {
+                      "name": "field_operating_area",
+                      "expression": "`field_operating_area`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "q_ds_p1_repair_area_area",
+                "query": {
+                  "datasetName": "ds_p1_repair_area",
+                  "fields": [
+                    {
+                      "name": "field_operating_area",
+                      "expression": "`field_operating_area`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "q_ds_p2_monthly_area",
+                "query": {
+                  "datasetName": "ds_p2_monthly",
+                  "fields": [
+                    {
+                      "name": "field_operating_area",
+                      "expression": "`field_operating_area`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "q_ds_p3_list_area",
+                "query": {
+                  "datasetName": "ds_p3_list",
+                  "fields": [
+                    {
+                      "name": "field_operating_area",
+                      "expression": "`field_operating_area`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "q_ds_p3_alerts_area",
+                "query": {
+                  "datasetName": "ds_p3_alerts",
+                  "fields": [
+                    {
+                      "name": "field_operating_area",
+                      "expression": "`field_operating_area`"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "filter-multi-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "field_operating_area",
+                    "displayName": "Operating area",
+                    "queryName": "q_ds_p1_kpis_area"
+                  },
+                  {
+                    "fieldName": "field_operating_area",
+                    "displayName": "Operating area",
+                    "queryName": "q_ds_p1_loss_month_area"
+                  },
+                  {
+                    "fieldName": "field_operating_area",
+                    "displayName": "Operating area",
+                    "queryName": "q_ds_p1_repair_area_area"
+                  },
+                  {
+                    "fieldName": "field_operating_area",
+                    "displayName": "Operating area",
+                    "queryName": "q_ds_p2_monthly_area"
+                  },
+                  {
+                    "fieldName": "field_operating_area",
+                    "displayName": "Operating area",
+                    "queryName": "q_ds_p3_list_area"
+                  },
+                  {
+                    "fieldName": "field_operating_area",
+                    "displayName": "Operating area",
+                    "queryName": "q_ds_p3_alerts_area"
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Operating area"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 4,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "budget-scenario",
+            "queries": [
+              {
+                "name": "dashboards/01f1e5ecdc1a1b0b8ab0a66212842a79/datasets/01f1e604c4391a3a9b3d0237f721a023_Budget Scenario",
+                "query": {
+                  "datasetName": "ba232594",
+                  "fields": [
+                    {
+                      "name": "Budget Scenario",
+                      "expression": "`Budget Scenario`"
+                    },
+                    {
+                      "name": "Budget Scenario_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              },
+              {
+                "name": "dashboards/01f1e5ecdc1a1b0b8ab0a66212842a79/datasets/01f1e606d0801090a3e5c72db3a145a9_Budget Scenario",
+                "query": {
+                  "datasetName": "35e45ef4",
+                  "fields": [
+                    {
+                      "name": "Budget Scenario",
+                      "expression": "`Budget Scenario`"
+                    },
+                    {
+                      "name": "Budget Scenario_associativity",
+                      "expression": "COUNT_IF(`associative_filter_predicate_group`)"
+                    }
+                  ],
+                  "disaggregated": false
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "disallowAll": true,
+              "selection": {
+                "defaultSelection": {
+                  "values": {
+                    "dataType": "STRING",
+                    "values": [
+                      {
+                        "value": "Treat top 50 wells"
+                      }
+                    ]
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": {
+                  "value": "Budget Scenario",
+                  "fields": []
+                }
+              },
+              "widgetType": "filter-single-select",
+              "encodings": {
+                "fields": [
+                  {
+                    "fieldName": "Budget Scenario",
+                    "queryName": "dashboards/01f1e5ecdc1a1b0b8ab0a66212842a79/datasets/01f1e604c4391a3a9b3d0237f721a023_Budget Scenario"
+                  },
+                  {
+                    "fieldName": "Budget Scenario",
+                    "queryName": "dashboards/01f1e5ecdc1a1b0b8ab0a66212842a79/datasets/01f1e606d0801090a3e5c72db3a145a9_Budget Scenario"
+                  }
+                ]
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 1,
+            "height": 2
+          }
+        }
+      ],
+      "pageType": "PAGE_TYPE_GLOBAL_FILTERS",
+      "layoutVersion": "GRID_V1"
+    }
+  ],
+  "uiSettings": {
+    "theme": {
+      "widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"
+    },
+    "applyModeEnabled": false
+  }
+}
