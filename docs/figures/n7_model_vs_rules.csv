@@ -1,7 +1,0 @@
-workload,method,flagged,precision_pct,failures_caught,label_failures,recall_pct
-Recency watchlist,Recency watchlist,2157,30.7,477,1518,31.4
-Recency watchlist,Gradient-boosted trees,2157,34.4,549,1518,36.2
-Recency watchlist,Logistic regression,2157,36.8,546,1518,36.0
-Either rule,Either rule,3182,24.3,588,1518,38.7
-Either rule,Gradient-boosted trees,3182,30.6,697,1518,45.9
-Either rule,Logistic regression,3182,31.2,679,1518,44.7

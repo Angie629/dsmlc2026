@@ -23,20 +23,59 @@ GRID = 12
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Reliability Investment Dashboard.lvdash.json")
 
 DATASETS = {
-    "ds_p1_kpis": ("Spend and lost oil, last 12 months, by area", f"""
-WITH area AS (SELECT DISTINCT field_operating_area FROM {S}.gold_well_month WHERE field_operating_area IS NOT NULL),
-rep AS (SELECT field_operating_area, SUM(field_est_clean) AS repair_cost_12m FROM {S}.silver_jobs
-        WHERE is_repair AND start_date > DATE'{LAST_12M}' GROUP BY field_operating_area),
-lost AS (SELECT field_operating_area, SUM(lost_oil_m3) AS lost_m3 FROM {S}.silver_downtime
-         WHERE is_downhole AND production_date > DATE'{LAST_12M}' GROUP BY field_operating_area)
-SELECT a.field_operating_area,
+    "ds_ov_wells": ("Overview: one row per well producing in the last 12 months", f"""
+WITH loc AS (SELECT uwi, MAX(well_name) AS well_name, MAX(field_operating_area) AS field_operating_area,
+                    MAX(surface_latitude) AS latitude, MAX(surface_longitude) AS longitude
+             FROM {S}.silver_daily
+             WHERE well_daily_status = 'Producing' AND production_date > DATE'{LAST_12M}'
+             GROUP BY uwi),
+cur AS (SELECT uwi, failures_prior_90 FROM {S}.gold_recency_tier WHERE is_current),
+lastf AS (SELECT uwi, failure_type_norm, cause FROM (
+            SELECT uwi, failure_type_norm, cause,
+                   ROW_NUMBER() OVER (PARTITION BY uwi ORDER BY failure_start_date DESC, failure_id) AS rn
+            FROM {S}.silver_failures) WHERE rn = 1),
+rep AS (SELECT uwi, SUM(field_est_clean) AS repair_cost_12m FROM {S}.silver_jobs
+        WHERE is_repair AND start_date > DATE'{LAST_12M}' GROUP BY uwi),
+lost AS (SELECT uwi, SUM(lost_oil_m3) AS lost_12m FROM {S}.silver_downtime
+         WHERE is_downhole AND production_date > DATE'{LAST_12M}' GROUP BY uwi),
+base AS (
+  SELECT l.uwi, COALESCE(l.well_name, l.uwi) AS well_name, COALESCE(l.field_operating_area, 'Unknown') AS field_operating_area,
+         l.latitude, l.longitude, COALESCE(c.failures_prior_90, 0) AS failures_last_90d,
+         lf.failure_type_norm AS last_failure_type, lf.cause AS last_failure_cause,
+         COALESCE(r.repair_cost_12m, 0) AS repair_cost_12m, COALESCE(o.lost_12m, 0) AS downhole_lost_oil_m3_12m
+  FROM loc l LEFT JOIN cur c USING (uwi) LEFT JOIN lastf lf USING (uwi) LEFT JOIN rep r USING (uwi) LEFT JOIN lost o USING (uwi)
+  WHERE l.latitude IS NOT NULL AND l.longitude IS NOT NULL)
+SELECT ROW_NUMBER() OVER (ORDER BY failures_last_90d DESC, repair_cost_12m + downhole_lost_oil_m3_12m * 6.2898 * {NETBACK} DESC, uwi) AS priority_rank,
+       uwi, well_name, field_operating_area, latitude, longitude,
+       CASE WHEN failures_last_90d >= 3 THEN '3+ failures' WHEN failures_last_90d = 2 THEN '2 failures'
+            WHEN failures_last_90d = 1 THEN '1 failure' ELSE 'No recent failure' END AS recency_tier,
+       failures_last_90d,
+       CASE WHEN failures_last_90d >= 2 THEN 1 ELSE 0 END AS on_watchlist,
+       ROUND(repair_cost_12m) AS repair_cost_12m,
+       ROUND(downhole_lost_oil_m3_12m * 6.2898 * {NETBACK}) AS lost_oil_value_12m,
+       ROUND(repair_cost_12m + downhole_lost_oil_m3_12m * 6.2898 * {NETBACK}) AS cost_12m,
+       CASE WHEN failures_last_90d = 0 THEN 'No action this week'
+            WHEN last_failure_type = 'Rods' AND last_failure_cause IN ('Fatigue', 'Corrosion') THEN 'Rod string upgrade or corrosion inhibition'
+            WHEN last_failure_type = 'Rods' THEN 'Rod failure root-cause review'
+            WHEN last_failure_type IN ('Pump', 'Tubing') THEN 'Pump and tubing failure review'
+            ELSE 'Root-cause review' END AS suggested_action
+FROM base"""),
+
+    "ds_p1_kpis": ("Spend and lost oil, last 12 months, by well", f"""
+WITH rep AS (SELECT uwi, field_operating_area, SUM(field_est_clean) AS repair_cost_12m FROM {S}.silver_jobs
+             WHERE is_repair AND start_date > DATE'{LAST_12M}' GROUP BY uwi, field_operating_area),
+lost AS (SELECT uwi, field_operating_area, SUM(lost_oil_m3) AS lost_m3 FROM {S}.silver_downtime
+         WHERE is_downhole AND production_date > DATE'{LAST_12M}' GROUP BY uwi, field_operating_area)
+SELECT COALESCE(r.uwi, l.uwi) AS uwi,
+       COALESCE(r.field_operating_area, l.field_operating_area) AS field_operating_area,
        COALESCE(r.repair_cost_12m, 0) AS repair_cost_12m,
        COALESCE(l.lost_m3, 0) AS downhole_lost_oil_m3_12m,
        COALESCE(l.lost_m3, 0) * 6.2898 * {NETBACK} AS downhole_lost_oil_value_12m
-FROM area a LEFT JOIN rep r USING (field_operating_area) LEFT JOIN lost l USING (field_operating_area)"""),
+FROM rep r FULL OUTER JOIN lost l ON r.uwi = l.uwi AND r.field_operating_area = l.field_operating_area"""),
 
     "ds_p1_loss_month": ("Lost oil by cause and month", f"""
 SELECT DATE_TRUNC('MONTH', production_date) AS month,
+       uwi,
        field_operating_area,
        CASE WHEN bucket IN ('Downhole', 'Surface equipment', 'Facility / pipeline', 'Power', 'Planned') THEN bucket ELSE 'Other' END AS downtime_bucket,
        SUM(lost_oil_m3) AS lost_oil_m3
@@ -55,10 +94,11 @@ SELECT failure_type,
        ROUND(100 * SUM(COALESCE(cost, 0)) / SUM(SUM(COALESCE(cost, 0))) OVER (), 1) AS share_of_repair_cost_pct
 FROM f GROUP BY failure_type"""),
 
-    "ds_p1_repair_area": ("Repair spend by area and job type, last 12 months", f"""
-SELECT field_operating_area, job_category_norm AS job_category, SUM(field_est_clean) AS repair_cost
+    "ds_p1_spend_month": ("Monthly repair spend by job type since 2023", f"""
+SELECT DATE_TRUNC('MONTH', start_date) AS month, uwi, field_operating_area, job_category_norm AS job_category,
+       SUM(field_est_clean) AS repair_cost
 FROM {S}.silver_jobs
-WHERE is_repair AND start_date > DATE'{LAST_12M}' AND field_est_clean > 0
+WHERE is_repair AND start_date >= DATE'2023-01-01' AND start_date <= DATE'{END}' AND field_est_clean > 0
 GROUP BY ALL"""),
 
     "ds_p2_counters": ("Re-failure within 90 days", f"""
@@ -79,23 +119,15 @@ FROM g CROSS JOIN (SELECT explode(sequence(0, 90)) AS day) days
 GROUP BY 1, 2"""),
 
     "ds_p2_gap": ("First-time vs repeat failures per month", f"""
-WITH f AS (SELECT field_operating_area, failure_type_norm AS failure_type, failure_start_date AS failure_date,
+WITH f AS (SELECT uwi, field_operating_area, failure_type_norm AS failure_type, failure_start_date AS failure_date,
                   LAG(failure_start_date) OVER (PARTITION BY uwi ORDER BY failure_start_date) AS prev_failure_date
            FROM {S}.gold_failure_gap WHERE failure_start_date >= DATE'{LOG_START}')
-SELECT date_trunc('MONTH', failure_date) AS month, field_operating_area, failure_type,
+SELECT date_trunc('MONTH', failure_date) AS month, uwi, field_operating_area, failure_type,
        CASE WHEN prev_failure_date IS NOT NULL AND datediff(failure_date, prev_failure_date) <= 90
             THEN 'Repeat (within 90 days of the last failure)' ELSE 'First failure, or over 90 days since the last' END AS failure_kind,
        COUNT(*) AS failures
 FROM f WHERE failure_date >= DATE'2025-09-01'
-GROUP BY 1, 2, 3, 4"""),
-
-    "ds_p2_monthly": ("Failures per month by type", f"""
-SELECT DATE_TRUNC('MONTH', failure_start_date) AS month,
-       field_operating_area,
-       CASE WHEN failure_type_norm IN ('Rods', 'Pump', 'Tubing') THEN failure_type_norm ELSE 'Other' END AS failure_type,
-       COUNT(*) AS failures
-FROM {S}.gold_failure_gap WHERE in_log_window
-GROUP BY ALL"""),
+GROUP BY 1, 2, 3, 4, 5"""),
 
     "ds_p2_tier": ("Chance of failure in the next 90 days by recent failures", f"""
 SELECT tier, ROUND(100 * AVG(failed_next_90), 1) AS p_fail_next_90d_pct, COUNT(*) AS well_snapshots
@@ -153,8 +185,10 @@ t AS (SELECT uwi, failures_prior_90 FROM {S}.gold_recency_tier WHERE is_current)
 SELECT a.alert_date, a.uwi, COALESCE(nm.well_name, a.uwi) AS well_name, a.field_operating_area,
        CAST(a.partial_7d AS INT) AS partial_days_last_7,
        COALESCE(t.failures_prior_90, 0) AS failures_last_90d,
-       CASE WHEN COALESCE(t.failures_prior_90, 0) >= 2 THEN 'Yes' ELSE 'No' END AS on_watchlist
-FROM a LEFT JOIN nm USING (uwi) LEFT JOIN t USING (uwi)"""),
+       CASE WHEN COALESCE(t.failures_prior_90, 0) >= 2 THEN '1 · Both rules (34% hit in 2026)'
+            ELSE '3 · Runtime rule only (13% hit)' END AS alert_tier
+FROM a LEFT JOIN nm USING (uwi) LEFT JOIN t USING (uwi)
+ORDER BY alert_tier, alert_date DESC"""),
 
     "ds_p5_rules": ("Runtime rule vs recency watchlist, 2026 holdout", f"""
 SELECT rule_name,
@@ -162,6 +196,13 @@ SELECT rule_name,
        ROUND(100 * recall, 1) AS recall_pct,
        alerts, alerts_per_area_week, median_lead_days, failures_caught, label_failures
 FROM {S}.gold_warning_eval WHERE window = '2026 holdout'"""),
+
+    "ds_p5_tiers": ("Alert tiers, 2026 holdout (notebooks/04b_ml_challenger)", f"""
+SELECT rule AS tier, alerts, precision_pct, failures_caught
+FROM {S}.gold_alert_tiers WHERE tier_order > 0 ORDER BY tier_order"""),
+
+    "ds_p5_challenger": ("Rules vs model at the same workload, 2026 (notebooks/04b_ml_challenger)", f"""
+SELECT workload, method, precision_pct, failures_caught FROM {S}.gold_model_eval"""),
 
     "ds_p4_cost": ("Cost per failure by type", f"""
 WITH f AS (
@@ -310,7 +351,8 @@ def test():
 
 
 def text(name, md, x, y, w, h):
-    return {"widget": {"name": name, "multilineTextboxSpec": {"lines": [md]}}, "position": {"x": x, "y": y, "width": w, "height": h}}
+    lines = [md] if "\n" not in md else [line + "\n" for line in md.split("\n")]
+    return {"widget": {"name": name, "multilineTextboxSpec": {"lines": lines}}, "position": {"x": x, "y": y, "width": w, "height": h}}
 
 
 def field(name, expr=None):
@@ -397,7 +439,7 @@ def budget_counter(name, col, x, w, fmt=None):
     if fmt:
         value["format"] = fmt
     spec = {"version": 2, "widgetType": "counter", "encodings": {"value": value}, "frame": {"showTitle": True, "title": col}}
-    return ui(widget(name, "ba232594", [field(f"sum({col})", f"SUM(`{col}`)")], spec, x, 23, w, 3, disaggregated=False))
+    return ui(widget(name, "ba232594", [field(f"sum({col})", f"SUM(`{col}`)")], spec, x, 20, w, 3, disaggregated=False))
 
 
 def subtitle(prefix, sentence):
@@ -421,6 +463,57 @@ CENTER = {"contentAlignment": "center"}
 
 
 def build():
+    # Every Overview widget reads ds_ov_wells, so clicking a well on the map cross-filters the rest of the page.
+    tier_colors = [{"value": "No recent failure", "color": "#D1D5DB"}, {"value": "1 failure", "color": "#FDBA74"},
+                   {"value": "2 failures", "color": "#EA580C"}, {"value": "3+ failures", "color": "#9A3412"}]
+    p0 = [
+        subtitle("p0", "One view of the problem and the plan. The page opens on wells that failed in the last 90 days; add \"No recent failure\" to see every producing well. Click a well on the map, or pick UWIs in the filter panel, and the counters, cost chart and table follow. Data to Oct 27, 2026."),
+        counter("p0-wells", "ds_ov_wells", "uwi", "Producing wells shown", 0, 1, "COUNT", w=3),
+        counter("p0-watch", "ds_ov_wells", "on_watchlist", "On the watchlist (2+ failures in 90 days)", 3, 1, "SUM", w=3),
+        ui(counter("p0-repair", "ds_ov_wells", "repair_cost_12m", "Repair spend, last 12 months (C$)", 6, 1, "SUM", w=3),
+           {"encodings": {"value": {"format": USD_COMPACT}}}),
+        ui(counter("p0-lost", "ds_ov_wells", "lost_oil_value_12m", "Downhole lost-oil value, last 12 months (C$)", 9, 1, "SUM", w=3),
+           {"encodings": {"value": {"format": USD_COMPACT}}}),
+        widget("p0-map", "ds_ov_wells",
+               [field("recency_tier"), field("latitude"), field("longitude"), field("uwi"), field("well_name"), field("cost_12m")],
+               {"version": 2, "widgetType": "symbol-map",
+                "encodings": {"coordinates": {"latitude": {"fieldName": "latitude"}, "longitude": {"fieldName": "longitude"}},
+                              "color": {"fieldName": "recency_tier", "displayName": "Failures in the last 90 days",
+                                        "scale": {"type": "categorical", "mappings": tier_colors}},
+                              "extra": [{"fieldName": "uwi"}, {"fieldName": "well_name"}, {"fieldName": "cost_12m"}]},
+                "frame": {"showTitle": True, "title": "Where the wells are: grey = no recent failure, darker orange = more failures in 90 days"},
+                "data": {"queryName": "main_query"}},
+               0, 3, 8, 8),
+        text("p0-story", "**What we found**\n\n- 57% of failures come back on the same well within 90 days.\n- Wells with 2+ recent failures fail again 61–70% of the time; with none, 26%.\n- Long history ranks wells only about as well as well size.\n- Two actions pay back in about 2 years if failures halve.\n\n**What we recommend**\n\n1. Work the watchlist every week, recent failures first.\n2. Fund the top 25 bad actors: C$0.85M, payback 1.1–2.3 years.\n3. Pilot in Cactus Lake and Winter (62% of failures), then scale.",
+             8, 5, 4, 6),
+        {"widget": {"name": "p0-tier-filter",
+                    "queries": [{"name": "q_ds_ov_wells_tier", "query": {"datasetName": "ds_ov_wells", "fields": [field("recency_tier")], "disaggregated": False}}],
+                    "spec": {"version": 2, "widgetType": "filter-multi-select",
+                             "encodings": {"fields": [{"fieldName": "recency_tier", "displayName": "Failures in the last 90 days", "queryName": "q_ds_ov_wells_tier"}]},
+                             "selection": {"defaultSelection": {"values": {"dataType": "STRING", "values": [
+                                 {"value": "1 failure"}, {"value": "2 failures"}, {"value": "3+ failures"}]}}},
+                             "frame": {"showTitle": True, "title": "Show wells with (failures in the last 90 days)"}}},
+         "position": {"x": 8, "y": 3, "width": 4, "height": 2}},
+        ui(bar("p0-area", "ds_ov_wells", qty("sum(cost_12m)", "12-month cost (C$)"), cat("field_operating_area", "Area"),
+               "12-month cost by area (repairs + lost oil, C$)", 0, 11, 6, 6, color=cat("recency_tier", "Recent failures"),
+               fields=[field("recency_tier"), field("sum(cost_12m)", "SUM(`cost_12m`)"), field("field_operating_area")], disaggregated=False),
+           {"encodings": {"y": {"scale": {"sort": {"by": "x-reversed"}}}, "x": {"format": USD_COMPACT},
+                          "color": {"scale": {"mappings": tier_colors}, **LEGEND_BOTTOM}}}),
+        ui(bar("p0-odds", "ds_p2_tier", cat("tier", "Failures in the last 90 days"), qty("p_fail_next_90d_pct", "Fail again within 90 days (%)"),
+               "Why recent failures lead: chance of failing again within 90 days (%)", 6, 11, 6, 6,
+               color={"fieldName": "tier", "scale": {"type": "categorical", "mappings": [
+                   {"color": "#D1D5DB", "value": "0"}, {"color": "#FDBA74", "value": "1"},
+                   {"color": "#EA580C", "value": "2"}, {"color": "#9A3412", "value": "3+"}]}},
+               fields=[field("tier"), field("p_fail_next_90d_pct")]),
+           {"encodings": {"x": {"scale": {"sort": {"by": "custom-order", "orderedValues": ["0", "1", "2", "3+"]}}},
+                          "label": {"show": True}}}, boxed_title=False),
+        table("p0-list", "ds_ov_wells", [
+            ("priority_rank", "Rank"), ("uwi", "UWI", {"useForSearch": True}), ("well_name", "Well"), ("field_operating_area", "Area"),
+            ("recency_tier", "Failures, last 90 days"), ("repair_cost_12m", "Repair cost, 12 months (C$)"),
+            ("lost_oil_value_12m", "Lost-oil value, 12 months (C$)"), ("cost_12m", "Total, 12 months (C$)"), ("suggested_action", "Suggested action")],
+            "Wells in view, ranked: recent failures first, then 12-month cost", 0, 17, GRID, 8),
+    ]
+
     p1 = [
         subtitle("p1", "Rods fail most often, but pump and tubing failures cost the most per repair. Spend also concentrates in a few areas. Last 12 months = Oct 28, 2025 to Oct 27, 2026."),
         counter("p1-spend", "ds_p1_kpis", "repair_cost_12m", "Repair spend, last 12 months (C$)", 0, 1, "SUM"),
@@ -440,10 +533,11 @@ def build():
                "Share of failures vs. repair cost by failure type (%)", 8, 3, 4, 6, group=True,
                fields=[field("failure_type"), field("share_of_failures_pct"), field("share_of_repair_cost_pct")]),
            {"encodings": {"x": NO_AXIS_TITLE}}),
-        ui(bar("p1-repair-area", "ds_p1_repair_area", qty("sum(repair_cost)", "Repair spend (C$)"), cat("field_operating_area", "Area"),
-               "Repair spend concentrates in a few areas (last 12 months, C$)", 0, 9, 12, 7, color=cat("job_category", "Job type"),
-               fields=[field("job_category"), field("sum(repair_cost)", "SUM(`repair_cost`)"), field("field_operating_area")], disaggregated=False),
-           {"encodings": {"y": {"scale": {"sort": {"by": "x-reversed"}}}}}),
+        ui(bar("p1-spend-month", "ds_p1_spend_month", {"fieldName": "month", "scale": {"type": "temporal"}, "displayName": "Month"},
+               qty("sum(repair_cost)", "Repair spend (C$)"), "Is it getting worse? Monthly repair spend since 2023 (C$)", 0, 9, 12, 7,
+               color=cat("job_category", "Job type"),
+               fields=[field("job_category"), field("month"), field("sum(repair_cost)", "SUM(`repair_cost`)")], disaggregated=False),
+           {"encodings": {"x": NO_AXIS_TITLE, "y": {"format": USD_COMPACT}, "color": LEGEND_BOTTOM}}),
     ]
 
     p2 = [
@@ -462,19 +556,15 @@ def build():
            {"encodings": {"x": NO_AXIS_TITLE, "color": {**LEGEND_BOTTOM, "scale": {"mappings": [
                {"color": "#94A3B8", "value": "First failure, or over 90 days since the last"},
                {"color": "#C2410C", "value": "Repeat (within 90 days of the last failure)"}]}}}}),
-        ui(bar("p2-monthly", "ds_p2_monthly", {"fieldName": "month", "scale": {"type": "temporal"}, "displayName": "Month"},
-               qty("sum(failures)", "Failures"), "Failures per month by type", 4, 9, 4, 6, color=cat("failure_type", "Type"),
-               fields=[field("failure_type"), field("month"), field("sum(failures)", "SUM(`failures`)")], disaggregated=False),
-           {"encodings": {"x": NO_AXIS_TITLE, "color": {"scale": {"mappings": [{"value": "Tubing", "color": theme(8)}]}}}}),
         ui(bar("p2-chronic", "ds_p2_chronic", cat("failures_per_well", "Failures per well since Jun 2025"),
                {"scale": {"type": "quantitative"}, "fields": [
                    {"fieldName": "share_of_wells_pct", "displayName": "% of wells"},
                    {"fieldName": "share_of_failures_pct", "displayName": "% of failures"}]},
-               "Share of wells and failures by failures per well (%)", 8, 9, 4, 6, group=True,
+               "Share of wells and failures by failures per well (%)", 6, 9, 6, 6, group=True,
                fields=[field("failures_per_well"), field("share_of_wells_pct"), field("share_of_failures_pct")]),
            {"mark": {"colors": [theme(1), theme(8)]}}),
         ui(bar("p2-prediction", "ds_p2_tier", cat("tier", "Failures in the last 90 days"), qty("p_fail_next_90d_pct", "Fail again within 90 days (%)"),
-               "Chance of failure in the next 90 days by recent failures (%)", 0, 9, 4, 6,
+               "Chance of failure in the next 90 days by recent failures (%)", 0, 9, 6, 6,
                color={"fieldName": "tier", "scale": {"type": "categorical", "mappings": [
                    {"color": "#E5E7EB", "value": "0"}, {"color": "#FDBA74", "value": "1"},
                    {"color": "#EA580C", "value": "2"}, {"color": "#9A3412", "value": "3+"}]}},
@@ -499,10 +589,9 @@ def build():
             ("cost_12m", "Cost incl. lost oil, 12 months (C$)"), ("suggested_action", "Suggested action")],
             "Ranked work list (sort by Rank)", 0, 9, 12, 10)),
         table("p3-alerts", "ds_p3_alerts", [
-            ("alert_date", "Alert date"), ("well_name", "Well"), ("field_operating_area", "Area"),
-            ("partial_days_last_7", "Partial-run days, last 7"), ("failures_last_90d", "Failures, last 90 days"),
-            ("on_watchlist", "Also on watchlist")],
-            "Runtime alerts in the last 14 days (2+ partial-run days in a week; 17% are followed by a failure within 2-30 days)", 0, 19, 12, 6),
+            ("alert_tier", "Alert tier (work top tier first)"), ("alert_date", "Alert date"), ("well_name", "Well"), ("field_operating_area", "Area"),
+            ("partial_days_last_7", "Partial-run days, last 7"), ("failures_last_90d", "Failures, last 90 days")],
+            "Runtime alerts in the last 14 days, by tier: both rules firing were right 34% of the time in 2026, runtime rule alone 13%", 0, 19, 12, 6),
     ]
 
     budget_cols = ["Priority Rank", "UWI", "Recommended Action", "Historical Failures", "Failures / Yr",
@@ -539,7 +628,7 @@ def build():
             ("annual_savings_per_well", "Savings per well (C$/yr)", {**CENTER, "format": cents()}),
             ("payback_years", "Payback (yrs)", {**CENTER, "style": payback_style, "format": {
                 "type": "number-plain", "abbreviation": "none", "decimalPlaces": {"type": "exact", "places": 1}, "hideGroupSeparator": True}})],
-            "Sensitivity: netback ±25%, action cost ×0.5 / ×1 / ×2, 25% or 50% fewer failures", 0, 15, 12, 7),
+            "Sensitivity: netback ±25%, action cost ×0.5 / ×1 / ×2, 25% or 50% fewer failures", 0, 12, 12, 7),
            {"encodings": {"rowOrder": [{"by": "column-reversed", "field": {"index": 5}}]}},
            query={"orders": [{"direction": "DESC", "expression": "`annual_savings_per_well`"}]}),
         ui(bar("p4-cost", "ds_p4_cost", cat("failure_type", "Failure type"),
@@ -549,16 +638,10 @@ def build():
                "Mean cost per failure, since Jun 2025 (C$)", 6, 3, 6, 6,
                fields=[field("failure_type"), field("mean_repair_cost"), field("mean_lost_oil_value")]),
            {"encodings": {"y": {**NO_AXIS_TITLE, "format": WHOLE}}, "mark": {"colors": [None, theme(8)], "layout": "stack"}}),
-        ui(table("p4-cost-table", "ds_p4_cost", [
-            ("failure_type", "Type", {"contentAlignment": "left"}), ("failures", "Failures", CENTER),
-            ("mean_cost_per_failure", "Mean cost (C$)", {**CENTER, "format": cents()}),
-            ("median_cost_per_failure", "Median cost (C$)", {**CENTER, "format": cents()}),
-            ("total_cost", "Total (C$)", {**CENTER, "format": cents()})],
-            "Cost per failure by type", 0, 12, 12, 3)),
         {"widget": {"name": "p4-budget", "spec": {"widgetType": "text", "version": 1, "encodings": {"text": {
             "lines": ["**Budget scenarios**: which wells to treat for 25 / 50 / 100 / 200-well budgets."], "fields": []}}}},
-         "position": {"x": 0, "y": 22, "width": GRID, "height": 1}},
-        text("p4-inputs", "**Inputs and where they come from.** Netback C$32.50 per boe from Strathcona Q3 2026 operating earnings (company-wide). Repair cost uses field estimates, not invoices; a repair job shared by two failures is split between them. Lost oil counts from the day the well stopped. Bad actors are picked on Jun–Dec 2025 failures and their rate is measured on Jan–Oct 2026. Action cost is assumed from the 2023+ Workover median because no regional price was found. Avoided shares of 25% and 50% are assumptions bracketing one vendor case (~34%); action effects are associations, not proven causes.", 0, 35, GRID, 2),
+         "position": {"x": 0, "y": 19, "width": GRID, "height": 1}},
+        text("p4-inputs", "**Inputs and where they come from.** Netback C$32.50 per boe from Strathcona Q3 2026 operating earnings (company-wide). Repair cost uses field estimates, not invoices; a repair job shared by two failures is split between them. Lost oil counts from the day the well stopped. Bad actors are picked on Jun–Dec 2025 failures and their rate is measured on Jan–Oct 2026. Action cost is assumed from the 2023+ Workover median because no regional price was found. Avoided shares of 25% and 50% are assumptions bracketing one vendor case (~34%); action effects are associations, not proven causes.", 0, 39, GRID, 2),
         budget_counter("wells-treated", "Total Budget Cost ($)", 0, 2, USD_COMPACT),
         budget_counter("fef63e69", "Measured Annual Savings @ 50% ($)", 2, 3, USD_COMPACT),
         budget_counter("c9851fa3", "Measured Annual Savings @ 25% ($)", 5, 3,
@@ -567,7 +650,19 @@ def build():
         ui(widget("treated-bad-actor-wells-selected-budget-scenario-ranked-shrunke", "35e45ef4", [field(c) for c in budget_cols],
                   {"frame": {"showTitle": True, "title": "Treated Bad-Actor Wells in Selected Budget Scenario (Ranked by Shrunken Return per Dollar)"},
                    "version": 2, "widgetType": "table", "encodings": {"columns": [{"fieldName": c} for c in budget_cols]}},
-                  0, 26, GRID, 9)),
+                  0, 30, GRID, 9)),
+        widget("27e87097", "35e45ef4",
+               [field("Priority Rank"),
+                field("sum(Expected Annual Savings @ 25% ($))", "SUM(`Expected Annual Savings @ 25% ($)`)"),
+                field("sum(Expected Annual Savings @ 50% ($))", "SUM(`Expected Annual Savings @ 50% ($)`)")],
+               {"version": 3, "mark": {"lineShape": "linear"}, "widgetType": "line",
+                "encodings": {"x": {"fieldName": "Priority Rank", "scale": {"type": "quantitative"}},
+                              "y": {"scale": {"type": "quantitative"}, "fields": [
+                                  {"fieldName": "sum(Expected Annual Savings @ 25% ($))"},
+                                  {"fieldName": "sum(Expected Annual Savings @ 50% ($))"}]},
+                              "color": {"legend": {"position": "bottom"}}},
+                "data": {"queryName": "main_query"}},
+               0, 23, GRID, 7, disaggregated=False),
     ]
 
     precision_recall = {"scale": {"type": "quantitative"}, "fields": [
@@ -592,26 +687,42 @@ def build():
            {"encodings": {"x": {"axis": {"labelAngle": 0, "hideTitle": True}}, "y": {"axis": {"hideLabels": False, "hideTitle": True}},
                           "label": {"show": False}},
             "mark": {"colors": [None, theme(10)]}}),
-        table("p5-rules-table", "ds_p5_rules", [
-            ("rule_name", "Rule"), ("alerts", "Alerts"), ("precision_pct", "Precision (%)"), ("recall_pct", "Recall (%)"),
-            ("failures_caught", "Failures caught"), ("label_failures", "Failures"),
-            ("alerts_per_area_week", "Alerts per area-week"), ("median_lead_days", "Median warning (days)")],
-            "Early-warning test on Jan–Oct 2026 (rule frozen on 2025)", 6, 9, 6, 6),
-        text("p5-rules-note", "**How to read the early-warning test.** Rule frozen on Jun–Dec 2025: alert when a producing well has 2+ partial-run days in a week (down-day and efficiency rules did not add precision). An alert is a hit if the well stops for a rod, pump or tubing failure 2–30 days later; one alert per well per 14 days. Recommendation: lead with the recency watchlist; add the runtime rule if crews can handle about 9 alerts per area per week, which lifts failures caught from 500 to 813 of 1,432.", 0, 15, GRID, 2),
+        ui(bar("p5-tiers", "ds_p5_tiers", cat("tier", "Alert tier"), qty("precision_pct", "Right (%)"),
+               "Alert tiers in 2026: work the top tier first (% of alerts followed by a failure)", 6, 9, 6, 6,
+               color={"fieldName": "tier", "scale": {"type": "categorical", "mappings": [
+                   {"color": "#9A3412", "value": "1 · Both rules"}, {"color": "#EA580C", "value": "2 · Watchlist only"},
+                   {"color": "#FDBA74", "value": "3 · Runtime rule only"}]}},
+               fields=[field("tier"), field("precision_pct")]),
+           {"encodings": {"x": {"axis": {"labelAngle": 0, "hideTitle": True}}, "label": {"show": True}}}, boxed_title=False),
+        ui(bar("p5-challenger", "ds_p5_challenger", cat("workload", "Same number of alerts as"), qty("precision_pct", "Right (%)"),
+               "Rules vs a simple model at the same workload, 2026 (% of flags followed by a failure)", 0, 15, GRID, 6,
+               color=cat("method", "Method"), group=True,
+               fields=[field("workload"), field("method"), field("precision_pct")]),
+           {"encodings": {"x": {"axis": {"labelAngle": 0}}, "color": {**LEGEND_BOTTOM, "scale": {"mappings": [
+               {"color": "#9CA3AF", "value": "Rule"}, {"color": "#EA580C", "value": "Logistic regression"},
+               {"color": "#9A3412", "value": "Gradient-boosted trees"}]}}, "label": {"show": True}}}, boxed_title=False),
+        text("p5-rules-note", "**How to read the early-warning test.** Rule frozen on Jun–Dec 2025: alert when a producing well has 2+ partial-run days in a week (down-day and efficiency rules did not add precision). An alert is a hit if the well stops for a rod, pump or tubing failure 2–30 days later; one alert per well per 14 days. Recommendation: lead with the recency watchlist; add the runtime rule if crews can handle about 9 alerts per area per week, which lifts failures caught from 500 to 813 of 1,432. **Model challenger:** one row per producing well every 14 days, trained on Jun–Dec 2025 and tested on Jan–Oct 2026 at the same number of flags; it beats the rules by 4–7 points, so we pilot it next to the rules (notebooks/04b_ml_challenger.py).", 0, 21, GRID, 3),
     ]
 
     p6 = [
         subtitle("p6", "We cleaned the raw files, logged every rule, and list what the data cannot tell us."),
         counter("p6-rows", "ds_p6_clean", "rows_affected", "Rows changed by cleaning rules", 0, 1, "SUM"),
         text("p6-limits", "**What this data cannot tell us.** The failure log starts in Jun 2025. Rod truck cost is missing before 2023. Costs are field estimates, not invoiced costs. Lost oil is an operator estimate. Torque and current repeat day to day (manual entries). The netback is company-wide, not heavy-oil only. Action effects are associations, not proven causes.", 4, 1, 8, 2),
-        bar("p6-rules", "ds_p6_clean", qty("rows_affected", "Rows affected"), cat("rule", "Rule"),
-            "Where cleaning changed the most rows", 0, 3, GRID, 7, fields=[field("rule"), field("rows_affected")]),
         table("p6-log", "ds_p6_clean", [("rule", "Rule"), ("table_name", "Table"), ("rows_affected", "Rows affected"),
-                                         ("share_of_table_pct", "Share of source rows (%)")], "Cleaning log (latest run)", 0, 10, GRID, 7),
-        text("p6-ranking", "**Does cleaning change who is on the list? No.** We ranked wells by 12-month cost (repair $ + lost-oil value, Oct 28, 2025 to Oct 27, 2026) on the raw files and again after cleaning. The top 10, 25, 50 and 100 wells are identical, no top-50 well moves a single place, and total cost changes by 0.01%. The rules that matter for the ranking remove 23 duplicate jobs and 29 duplicate well-days; the pressure fixes (999999 placeholders, out-of-range values) and sensor caps do not enter the cost score.", 0, 17, GRID, 2),
+                                         ("share_of_table_pct", "Share of source rows (%)")], "Cleaning log (latest run)", 0, 3, GRID, 8),
+        text("p6-ranking", "**Does cleaning change who is on the list? No.** We ranked wells by 12-month cost (repair $ + lost-oil value, Oct 28, 2025 to Oct 27, 2026) on the raw files and again after cleaning. The top 10, 25, 50 and 100 wells are identical, no top-50 well moves a single place, and total cost changes by 0.01%. The rules that matter for the ranking remove 23 duplicate jobs and 29 duplicate well-days; the pressure fixes (999999 placeholders, out-of-range values) and sensor caps do not enter the cost score.", 0, 11, GRID, 2),
     ]
 
-    area_ds = ["ds_p1_kpis", "ds_p1_loss_month", "ds_p1_repair_area", "ds_p2_monthly", "ds_p3_list", "ds_p3_alerts"]
+    area_ds = ["ds_p1_kpis", "ds_p1_loss_month", "ds_p1_spend_month", "ds_p2_gap", "ds_p3_list", "ds_p3_alerts", "ds_ov_wells"]
+    uwi_ds = {"ds_ov_wells": "uwi", "ds_p1_kpis": "uwi", "ds_p1_loss_month": "uwi", "ds_p1_spend_month": "uwi", "ds_p2_gap": "uwi",
+              "ds_p3_list": "uwi", "ds_p3_alerts": "uwi", "35e45ef4": "UWI"}
+    uwi_filter = {"widget": {"name": "filter-uwi",
+                             "queries": [{"name": f"q_{d}_uwi", "query": {"datasetName": d, "fields": [field(c)], "disaggregated": False}}
+                                         for d, c in uwi_ds.items()],
+                             "spec": {"version": 2, "widgetType": "filter-multi-select",
+                                      "encodings": {"fields": [{"fieldName": c, "displayName": "UWI", "queryName": f"q_{d}_uwi"} for d, c in uwi_ds.items()]},
+                                      "frame": {"showTitle": True, "title": "UWI (type or pick wells)"}}},
+                  "position": {"x": 0, "y": 4, "width": 4, "height": 2}}
     filt = {"widget": {"name": "filter-area",
                        "queries": [{"name": f"q_{d}_area", "query": {"datasetName": d, "fields": [field("field_operating_area")], "disaggregated": False}} for d in area_ds],
                        "spec": {"version": 2, "widgetType": "filter-multi-select",
@@ -638,13 +749,14 @@ def build():
     return {
         "datasets": [{"name": n, "displayName": d, "queryLines": [l + "\n" for l in sql.strip().split("\n")]} for n, (d, sql) in DATASETS.items()],
         "pages": [
+            page("p0", "Overview", p0),
             page("p1", "Cost Drivers", p1),
             page("p2", "Recurrence Analysis", p2),
             page("p3", "Work Order Priorities", p3),
             page("p4", "Return on Action", p4),
             page("p5", "Model Validation", p5),
             page("p6", "Data Quality", p6),
-            {"name": "filters", "displayName": "Filters", "pageType": "PAGE_TYPE_GLOBAL_FILTERS", "layout": [filt, scenario_filter],
+            {"name": "filters", "displayName": "Filters", "pageType": "PAGE_TYPE_GLOBAL_FILTERS", "layout": [filt, scenario_filter, uwi_filter],
              "layoutVersion": "GRID_V1"},
         ],
         "uiSettings": {"theme": {"widgetHeaderAlignment": "ALIGNMENT_UNSPECIFIED"}, "applyModeEnabled": False},
@@ -656,19 +768,18 @@ def check_layout(d):
     for p in d["pages"]:
         if p["pageType"] != "PAGE_TYPE_CANVAS":
             continue
-        rows = {}
+        owner = {}
         for item in p["layout"]:
             pos = item["position"]
-            rows.setdefault(pos["y"], []).append((pos["x"], pos["width"], pos["height"]))
-        for y, cells in rows.items():
-            cells.sort()
-            x = 0
-            for cx, w, _ in cells:
-                if cx != x:
-                    problems.append(f"{p['name']} y={y}: gap at x={x}")
-                x = cx + w
-            if x != GRID:
-                problems.append(f"{p['name']} y={y}: row width {x}, expected {GRID}")
+            for y in range(pos["y"], pos["y"] + pos["height"]):
+                for x in range(pos["x"], pos["x"] + pos["width"]):
+                    if (y, x) in owner:
+                        problems.append(f"{p['name']}: {item['widget']['name']} overlaps {owner[(y, x)]} at y={y}, x={x}")
+                    owner[(y, x)] = item["widget"]["name"]
+        for y in sorted({y for y, _ in owner}):
+            missing = [x for x in range(GRID) if (y, x) not in owner]
+            if missing:
+                problems.append(f"{p['name']} y={y}: empty cells at x={missing[0]}..{missing[-1]}")
         for item in p["layout"]:
             w = item["widget"]
             if "queries" in w:

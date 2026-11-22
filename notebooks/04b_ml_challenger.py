@@ -1,87 +1,95 @@
-"""Tasks n6 (alert tiers) and n7 (time-boxed ML challenger), run locally on the organizer Parquet files.
+# Databricks notebook source
+# MAGIC %md
+# MAGIC # 04b · Alert tiers and an ML challenger · tasks n6, n7
+# MAGIC
+# MAGIC Build plan tasks n6 and n7. Needs `01a_clean_daily`, `01b_clean_jobs_failures`, `01d_daily_checks` (`gold_failure_downtime`) and `04a_early_warning` section 8 (`gold_warning_eval`). Writes `gold_alert_tiers`, `gold_model_eval` and `gold_model_weights`.
+# MAGIC
+# MAGIC 1. **Alert tiers (n6).** Split the 2026 holdout alerts by which rule fired on the alert day: both rules, the recency watchlist only, or the runtime rule only. Precision per tier tells crews which alerts to work first, a risk score without a model.
+# MAGIC 2. **ML challenger (n7).** One row per producing well every 14 days. Label: a rod, pump or tubing stop 2–30 days later (the same definition as the alert test). Features use only data before the snapshot. Train on Jun–Dec 2025, test on Jan–Oct 2026 with no tuning on 2026, and compare with the rules **at the same number of flags**.
+# MAGIC
+# MAGIC Rules come first because the failure log only starts in Jun 2025, torque is missing or repeated on most well-days, and recent failures already carry most of the signal. A model is adopted only if it holds its edge without more alerts for crews.
 
-Run from the repo root (needs dataset/*.parquet, pandas, scikit-learn):
-    python notebooks/04b_ml_challenger.py
-
-Runs locally because the Databricks Free Edition warehouse hit its daily compute limit on Nov 21.
-It rebuilds the 04a early-warning test (stop-day labels, 2+ partial-run days in 7, recency watchlist,
-14-day suppression) and first checks that it reproduces the 2026 holdout numbers in gold_warning_eval.
-Writes results to docs/figures/n6_alert_tiers.csv and docs/figures/n7_model_vs_rules.csv.
-"""
-import os
+# COMMAND ----------
 
 import numpy as np
 import pandas as pd
+from pyspark.sql import functions as F
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-DATA = os.path.join(ROOT, "dataset")
-OUT = os.path.join(ROOT, "docs", "figures")
+CATALOG_SCHEMA = "workspace.dsmlc"
+DAILY = f"{CATALOG_SCHEMA}.silver_daily"
+FAILURES = f"{CATALOG_SCHEMA}.silver_failures"
+JOBS = f"{CATALOG_SCHEMA}.silver_jobs"
+STOPS = f"{CATALOG_SCHEMA}.gold_failure_downtime"
+WARNING_EVAL = f"{CATALOG_SCHEMA}.gold_warning_eval"
 
 LOG_START = pd.Timestamp("2025-06-01")
 DATA_END = pd.Timestamp("2026-10-27")
-LOAD_START = pd.Timestamp("2024-10-01")
-LOOK_BACK, LOOK_AHEAD = 60, 60
+LOAD_START = "2024-10-01"
 LEAD_MIN, LEAD_MAX = 2, 30
 SUPPRESS_DAYS = 14
 PARTIAL_DAYS = 2
 RECENCY_DAYS, RECENCY_MIN = 90, 2
 HOLDOUT = dict(alert0=pd.Timestamp("2026-01-01"), alert1=DATA_END, label0=pd.Timestamp("2026-01-31"), label1=DATA_END)
-TYPE_MAP = {"rods": "Rods", "rod": "Rods", "|rod": "Rods", "pump": "Pump", "pcp": "Pump",
-            "tubing": "Tubing", "hole in tbg colar": "Tubing"}
-DOWNHOLE = ("Rods", "Pump", "Tubing")
-REPAIR = ("rod truck", "workover")
+TRAIN = ("2025-06-02", "2025-11-30")
+TEST = ("2026-01-05", str((DATA_END - pd.Timedelta(days=LEAD_MAX)).date()))
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 1. Load
+# MAGIC
+# MAGIC Producing-direction well-days from Oct 2024 (enough history for 180-day windows on the first snapshot), every failure since Jun 2025, Rod Truck and Workover jobs with a cost, and the stop day of each rod, pump or tubing failure from `gold_failure_downtime`.
+
+# COMMAND ----------
+
+def to_day(s):
+    s = pd.to_datetime(s)
+    return (s.dt.tz_localize(None) if s.dt.tz is not None else s).dt.normalize()
 
 
 def load():
-    cols = ["uwi", "production_date", "field_operating_area", "well_daily_status", "flow_direction",
-            "hours_on_prod", "pump_efficiency_pct", "pcp_pump_make"]
-    d = pd.read_parquet(os.path.join(DATA, "daily_production.parquet"), columns=cols)
-    d["day"] = pd.to_datetime(d.production_date).dt.normalize()
-    d = d[(d.day >= LOAD_START) & (d.flow_direction == "production")]
-    d = d.sort_values(["uwi", "day", "hours_on_prod"], na_position="first").drop_duplicates(["uwi", "day"], keep="last")
-
-    f = pd.read_parquet(os.path.join(DATA, "production_failures.parquet"))
-    f = f.drop_duplicates(["uwi", "failure_start_date", "failure_type"])
-    f["day"] = pd.to_datetime(f.failure_start_date).dt.normalize()
-    f["ftype"] = f.failure_type.str.strip().str.lower().map(TYPE_MAP).fillna("Other")
-    f = f[f.day >= LOG_START].reset_index(drop=True)
-
-    j = pd.read_parquet(os.path.join(DATA, "well_jobs.parquet"))
-    j["day"] = pd.to_datetime(j.start_date).dt.normalize()
-    j = j.drop_duplicates(["uwi", "day", "job_type", "job_subtype"])
-    j = j[j.job_category.str.strip().str.lower().isin(REPAIR) & (j.field_est_total > 0)]
-    return d, f, j[["uwi", "day", "field_est_total"]]
-
-
-def stop_days(d, f):
-    """Stop day per rod/pump/tubing failure: start of the down streak covering the logged day or the day before (01d)."""
-    hours = {u: g.set_index("day").hours_on_prod for u, g in d[d.uwi.isin(f.uwi)].groupby("uwi")}
-    empty = pd.Series(dtype=float)
-    offs = np.arange(-LOOK_BACK, LOOK_AHEAD + 1)
-    stops = []
-    for uwi, day in zip(*f.loc[f.ftype.isin(DOWNHOLE), ["uwi", "day"]].T.values):
-        h = hours.get(uwi, empty).reindex(day + pd.to_timedelta(offs, "D")).fillna(0).to_numpy()
-        down = h < 1
-
-        def streak_start(i):
-            while i > 0 and down[i - 1]:
-                i -= 1
-            return offs[i]
-
-        i0 = LOOK_BACK
-        off = streak_start(i0) if down[i0] else (streak_start(i0 - 1) if down[i0 - 1] else 0)
-        stops.append((uwi, day + pd.Timedelta(days=int(off))))
-    return pd.DataFrame(stops, columns=["uwi", "stop"])
+    d = (spark.table(DAILY)
+         .filter((F.col("flow_direction") == "production") & (F.col("production_date") >= LOAD_START))
+         .select("uwi", F.col("production_date").alias("day"), "field_operating_area", "well_daily_status",
+                 F.col("hours_on_prod").cast("double").alias("hours_on_prod"),
+                 F.col("pump_efficiency_pct").cast("double").alias("pump_efficiency_pct"),
+                 F.col("pcp_pump_make_norm").alias("pump_make"))
+         .toPandas())
+    f = (spark.table(FAILURES)
+         .filter(F.col("failure_start_date") >= str(LOG_START.date()))
+         .select("uwi", F.col("failure_start_date").alias("day"), F.col("failure_type_norm").alias("ftype"))
+         .toPandas())
+    j = (spark.table(JOBS)
+         .filter(F.col("is_repair") & (F.col("field_est_clean") > 0))
+         .select("uwi", F.col("start_date").alias("day"), F.col("field_est_clean").cast("double").alias("field_est_total"))
+         .toPandas())
+    stops = (spark.table(STOPS).filter(F.col("stop_date").isNotNull())
+             .select("uwi", F.col("stop_date").alias("stop")).toPandas())
+    d["day"], f["day"], j["day"], stops["stop"] = to_day(d.day), to_day(f.day), to_day(j.day), to_day(stops.stop)
+    f["ftype"] = f.ftype.where(f.ftype.isin(["Rods", "Pump", "Tubing"]), "Other")
+    return d, f, j, stops
 
 
-def daily_grid(d, a0, a1):
+d, f, j, stops = load()
+print(f"{len(d):,} producing-direction well-days, {len(f):,} failures since Jun 2025, {len(j):,} costed repair jobs, {len(stops):,} rod/pump/tubing stops")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 2. Alert tiers on the 2026 holdout (n6)
+# MAGIC
+# MAGIC Same test as `04a` section 8: rules run on producing days only; a hit is a stop 2–30 days after the alert; one alert per well per 14 days. The first three rows must match `gold_warning_eval`.
+
+# COMMAND ----------
+
+def daily_grid(d, a0, a1, extra_wells=()):
     """Day x well arrays: producing flag, partial-run days in the last 7 days, area."""
     dates = pd.date_range(a0, a1, freq="D")
-    wells = pd.Index(sorted(d.uwi.unique()))
+    wells = pd.Index(sorted(set(d.uwi) | set(extra_wells)))
     x = d[(d.day >= a0 - pd.Timedelta(days=6)) & (d.day <= a1)].copy()
     x["partial"] = ((x.hours_on_prod > 0) & (x.hours_on_prod < 23)).astype(int)
     full = pd.date_range(a0 - pd.Timedelta(days=6), a1, freq="D")
@@ -105,7 +113,8 @@ def suppress(trigger, gap=SUPPRESS_DAYS):
 
 def holdout_context(d, f, stops):
     w = HOLDOUT
-    dates, wells, active, partial_7d, area = daily_grid(d, w["alert0"], w["alert1"])
+    # Stop and failure wells are kept even without producing rows, as in 04a, so recall uses the same denominator.
+    dates, wells, active, partial_7d, area = daily_grid(d, w["alert0"], w["alert1"], set(stops.uwi) | set(f.uwi))
     D, W, d0 = len(dates), len(wells), dates[0]
     hit = np.zeros((D, W), dtype=bool)
     labels = []
@@ -146,16 +155,30 @@ def evaluate(sel, ctx):
 
 def n6_tiers(ctx):
     watch, runtime = suppress(ctx["watch"]), suppress(ctx["runtime"])
-    rows = [{"rule": "Recency watchlist (2+ in 90 days)", **evaluate(watch, ctx)},
-            {"rule": "Runtime rule (2+ partial-run days in 7)", **evaluate(runtime, ctx)},
-            {"rule": "Either rule", **evaluate(watch | runtime, ctx)}]
+    rows = [{"tier_order": 0, "rule": "Recency watchlist (2+ in 90 days)", **evaluate(watch, ctx)},
+            {"tier_order": 0, "rule": "Runtime rule (2+ partial-run days in 7)", **evaluate(runtime, ctx)},
+            {"tier_order": 0, "rule": "Either rule", **evaluate(watch | runtime, ctx)}]
     either = suppress(ctx["watch"] | ctx["runtime"])
-    both = either & ctx["watch"] & ctx["runtime"]
-    rows += [{"rule": "Tier 1: both rules on the alert day", **evaluate(both, ctx)},
-             {"rule": "Tier 2: watchlist only", **evaluate(either & ctx["watch"] & ~ctx["runtime"], ctx)},
-             {"rule": "Tier 3: runtime rule only", **evaluate(either & ctx["runtime"] & ~ctx["watch"], ctx)}]
+    rows += [{"tier_order": 1, "rule": "1 · Both rules", **evaluate(either & ctx["watch"] & ctx["runtime"], ctx)},
+             {"tier_order": 2, "rule": "2 · Watchlist only", **evaluate(either & ctx["watch"] & ~ctx["runtime"], ctx)},
+             {"tier_order": 3, "rule": "3 · Runtime rule only", **evaluate(either & ctx["runtime"] & ~ctx["watch"], ctx)}]
     return pd.DataFrame(rows)
 
+
+ctx = holdout_context(d, f, stops)
+tiers = n6_tiers(ctx)
+display(tiers)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 3. ML challenger (n7)
+# MAGIC
+# MAGIC Features per snapshot, all from before the snapshot day: failures in the last 30 / 90 / 180 days and so far, days since the last failure, last failure type, Rod Truck and Workover $ in the last 12 months, partial-run and down days in the last 7 and 30 days, efficiency drift (7-day mean minus the prior 60-day mean), area and pump make. Logistic regression (scaled, class-weighted) and gradient-boosted trees, both from scikit-learn, no tuning.
+# MAGIC
+# MAGIC Comparison at the same workload: the model flags as many test snapshots as the rule does, its top scores, and both are scored on the same snapshots.
+
+# COMMAND ----------
 
 def snapshots(d, f, j, stops, start, end):
     """One row per producing well every 14 days; features use data before the snapshot day only."""
@@ -163,15 +186,14 @@ def snapshots(d, f, j, stops, start, end):
     x = d.copy()
     x["partial"] = ((x.hours_on_prod > 0) & (x.hours_on_prod < 23)).astype(int)
     x["down"] = (x.hours_on_prod.fillna(0) < 1).astype(int)
-    make = x.pcp_pump_make.str.strip().str.lower().str.split().str[0]
-    top = make.value_counts().head(8).index
-    x["make"] = np.where(make.isin(top), make, "other")
+    top = x.pump_make.value_counts().head(8).index
+    x["make"] = np.where(x.pump_make.isin(top), x.pump_make, "Other")
     rows = []
     for t in days:
         today = x[(x.day == t) & (x.well_daily_status == "Producing")][["uwi", "field_operating_area", "make"]]
         if today.empty:
             continue
-        r = today.set_index("uwi")
+        r = today.drop_duplicates("uwi").set_index("uwi")
         for n in (7, 30):
             win = x[(x.day >= t - pd.Timedelta(days=n)) & (x.day < t)].groupby("uwi")
             r[f"partial_{n}d"] = win.partial.sum()
@@ -217,7 +239,7 @@ def top_n(score, n):
 
 
 def score_selection(test, sel, stops):
-    """Precision on snapshots, recall over 2026 stops that had a snapshot 2-30 days before."""
+    """Precision on snapshots; recall over test-period stops that had a snapshot 2-30 days before."""
     eligible = stops[(stops.stop >= test.snapshot.min() + pd.Timedelta(days=LEAD_MIN)) &
                      (stops.stop <= test.snapshot.max() + pd.Timedelta(days=LEAD_MAX))]
     picked = test[sel]
@@ -229,45 +251,58 @@ def score_selection(test, sel, stops):
                 recall_pct=round(100 * len(caught) / len(eligible), 1))
 
 
-def n7_challenger(d, f, j, stops):
-    train = snapshots(d, f, j, stops, "2025-06-02", "2025-11-30")
-    test = snapshots(d, f, j, stops, "2026-01-05", DATA_END - pd.Timedelta(days=LEAD_MAX))
-    Xtr = design(train)
-    Xte = design(test, Xtr.columns)
-    hgb = HistGradientBoostingClassifier(max_iter=200, learning_rate=0.05, random_state=0).fit(Xtr, train.label)
-    lr = make_pipeline(StandardScaler(), LogisticRegression(max_iter=2000, class_weight="balanced"))
-    lr.fit(Xtr.fillna(Xtr.median()), train.label)
-    scores = {"Gradient-boosted trees": hgb.predict_proba(Xte)[:, 1],
-              "Logistic regression": lr.predict_proba(Xte.fillna(Xtr.median()))[:, 1]}
-    watch = (test.failures_90d >= RECENCY_MIN).to_numpy()
-    runtime = (test.partial_7d >= PARTIAL_DAYS).to_numpy()
-    rows = []
-    for rule_name, rule in (("Recency watchlist", watch), ("Either rule", watch | runtime)):
-        rows.append({"workload": rule_name, "method": rule_name, **score_selection(test, rule, stops)})
-        for name, s in scores.items():
-            rows.append({"workload": rule_name, "method": name, **score_selection(test, top_n(s, int(rule.sum())), stops)})
-    lr_coef = pd.Series(lr[-1].coef_[0], index=Xtr.columns).sort_values(key=abs, ascending=False)
-    info = dict(train_rows=len(train), train_label_rate=round(100 * train.label.mean(), 2),
-                test_rows=len(test), test_label_rate=round(100 * test.label.mean(), 2))
-    return pd.DataFrame(rows), lr_coef.head(8), info
+train = snapshots(d, f, j, stops, *TRAIN)
+test = snapshots(d, f, j, stops, *TEST)
+Xtr = design(train)
+Xte = design(test, Xtr.columns)
+fill = Xtr.median()
+hgb = HistGradientBoostingClassifier(max_iter=200, learning_rate=0.05, random_state=0).fit(Xtr, train.label)
+lr = make_pipeline(StandardScaler(), LogisticRegression(max_iter=2000, class_weight="balanced")).fit(Xtr.fillna(fill), train.label)
+scores = {"Logistic regression": lr.predict_proba(Xte.fillna(fill))[:, 1],
+          "Gradient-boosted trees": hgb.predict_proba(Xte)[:, 1]}
 
+watch = (test.failures_90d >= RECENCY_MIN).to_numpy()
+runtime = (test.partial_7d >= PARTIAL_DAYS).to_numpy()
+rows = []
+for workload, rule in (("Watchlist", watch), ("Either rule", watch | runtime)):
+    label = f"{workload} ({int(rule.sum()):,} flags)"
+    rows.append({"workload": label, "method": "Rule", **score_selection(test, rule, stops)})
+    for name, s in scores.items():
+        rows.append({"workload": label, "method": name, **score_selection(test, top_n(s, int(rule.sum())), stops)})
+model_eval = pd.DataFrame(rows)
+weights = (pd.Series(lr[-1].coef_[0], index=Xtr.columns).rename("standardized_weight").reset_index()
+           .rename(columns={"index": "feature"}).sort_values("standardized_weight", key=abs, ascending=False))
+print(f"Train: {len(train):,} snapshots, {100 * train.label.mean():.1f}% labelled. Test: {len(test):,} snapshots, {100 * test.label.mean():.1f}% labelled.")
+display(model_eval)
+display(weights.head(10))
 
-if __name__ == "__main__":
-    pd.set_option("display.width", 200)
-    os.makedirs(OUT, exist_ok=True)
-    d, f, j = load()
-    stops = stop_days(d, f)
-    print(f"{len(f):,} failures since Jun 2025, {len(stops):,} rod/pump/tubing stops")
+# COMMAND ----------
 
-    ctx = holdout_context(d, f, stops)
-    tiers = n6_tiers(ctx)
-    print("\nn6 · 2026 holdout (compare the first three rows with gold_warning_eval: 28.8/34.9, 17.0/43.6, 21.6/56.8)")
-    print(tiers.to_string(index=False))
-    tiers.to_csv(os.path.join(OUT, "n6_alert_tiers.csv"), index=False)
+# MAGIC %md
+# MAGIC ## 4. Checks and write
 
-    result, coef, info = n7_challenger(d, f, j, stops)
-    print(f"\nn7 · snapshots every 14 days: {info}")
-    print(result.to_string(index=False))
-    print("\nLogistic regression, largest standardized coefficients:")
-    print(coef.round(2).to_string())
-    result.to_csv(os.path.join(OUT, "n7_model_vs_rules.csv"), index=False)
+# COMMAND ----------
+
+ref = spark.table(WARNING_EVAL).filter("window = '2026 holdout'").toPandas().set_index("rule_name")
+mine = tiers.set_index("rule")
+pairs = {"Recency watchlist (2+ in 90 days)": "Recency watchlist (2+ in 90 days)",
+         "Runtime rule (2+ partial-run days in 7)": "Runtime + efficiency rule",
+         "Either rule": "Rule or watchlist"}
+checks = {
+    f"{a} matches gold_warning_eval": int(mine.loc[a, "alerts"]) == int(ref.loc[b, "alerts"])
+    and int(mine.loc[a, "failures_caught"]) == int(ref.loc[b, "failures_caught"])
+    for a, b in pairs.items()
+}
+checks["tiers add up to the either-rule stream"] = int(tiers[tiers.tier_order > 0].alerts.sum()) == int(
+    suppress(ctx["watch"] | ctx["runtime"]).sum())
+checks["no snapshot feature reads the snapshot day or later"] = bool((train.days_since_failure.dropna() > 0).all() and (test.days_since_failure.dropna() > 0).all())
+checks["train and test snapshots do not overlap"] = train.snapshot.max() < test.snapshot.min()
+checks["model and rule flag the same number of snapshots"] = bool(model_eval.groupby("workload").flagged.nunique().eq(1).all())
+for name, ok in checks.items():
+    print(("PASS " if ok else "FAIL ") + name)
+assert all(checks.values()), "One or more checks failed"
+
+spark.createDataFrame(tiers).write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(f"{CATALOG_SCHEMA}.gold_alert_tiers")
+spark.createDataFrame(model_eval).write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(f"{CATALOG_SCHEMA}.gold_model_eval")
+spark.createDataFrame(weights).write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(f"{CATALOG_SCHEMA}.gold_model_weights")
+print("Wrote gold_alert_tiers, gold_model_eval, gold_model_weights")

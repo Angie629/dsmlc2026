@@ -81,7 +81,7 @@ notebooks/        Databricks notebooks, run in order (04b is plain Python)
   03b_runlife_payback  failure rates by pump make, model and RPM within area (gold_failure_rates); cost per failure and payback for 2 actions (gold_payback)
   03c_budget_scenarios  bad-actor wells ranked with Gamma–Poisson shrinkage; 25/50/100/200-well budget scenarios (gold_budget_wells, gold_budget_scenarios)
   04a_early_warning  sensors before failures, threshold grid, holdout evaluation and gold alert outputs
-  04b_ml_challenger  alert tiers (n6) and a time-boxed ML challenger (n7); plain Python on the Parquet files, writes docs/figures/n6_*.csv, n7_*.csv
+  04b_ml_challenger  alert tiers (n6) and a time-boxed ML challenger (n7) on the 2026 holdout (gold_alert_tiers, gold_model_eval, gold_model_weights)
   (05 reserved for weather: not used, power downtime is not seasonal)
 dashboard/        AI/BI dashboard: Reliability Investment Dashboard.lvdash.json, build_dashboard.py (rebuilds it and tests every query), page screenshots
 docs/             slides (.pptx and PDF), presentation script, figures, team docs
@@ -93,9 +93,8 @@ AI_LOG.md         AI usage log (required disclosure)
 ## How to reproduce
 
 1. Upload the three Parquet files to a Unity Catalog volume in a Databricks workspace.
-2. Run the `notebooks/01a` to `01d` notebooks in letter order, then `02a_ranking` through `04a_early_warning` in order, on serverless compute.
-3. Optional, runs on a laptop: put the Parquet files in `dataset/` and run `python notebooks/04b_ml_challenger.py` (pandas, scikit-learn) for the alert tiers and the ML challenger.
-4. Import `dashboard/Reliability Investment Dashboard.lvdash.json` (Dashboards → Create → Import from file), or rebuild it with `python dashboard/build_dashboard.py build` (`test` runs every dataset query on the SQL warehouse first).
+2. Run the `notebooks/01a` to `01d` notebooks in letter order, then `02a_ranking` through `04b_ml_challenger` in order, on serverless compute.
+3. Import `dashboard/Reliability Investment Dashboard.lvdash.json` (Dashboards → Create → Import from file), or rebuild it with `python dashboard/build_dashboard.py build` (`test` runs every dataset query on the SQL warehouse first).
 
 Credentials are never stored in the notebooks or this repo. Use Databricks secrets or environment variables.
 
@@ -142,7 +141,7 @@ cost_score = repair_$ + downhole_lost_oil_m3 × 6.2898 × netback_per_bbl
 
 ### Alert tiers and an ML challenger (2026 holdout)
 
-We lead with transparent rules and kept machine learning to one time-boxed challenger, scored at the same workload as the rules. Both checks run in `notebooks/04b_ml_challenger.py` on the Parquet files (the Databricks warehouse was over its daily limit). The local rebuild reproduces the Databricks test exactly on alerts, precision and failures caught: watchlist 28.8%, runtime rule 17.0%, either rule 21.6%; 500, 625 and 813 failures caught.
+We lead with transparent rules and kept machine learning to one time-boxed challenger, scored at the same workload as the rules. Both checks run in `notebooks/04b_ml_challenger.py`, which re-runs the `04a` alert test and asserts that it matches `gold_warning_eval` exactly (watchlist 28.8%, runtime rule 17.0%, either rule 21.6%; 500, 625 and 813 of 1,432 failures caught). The tables below are from the first, local run; the notebook writes the final numbers to `gold_alert_tiers` and `gold_model_eval`, and the Model Validation tab reads them.
 
 **Alert tiers (n6).** We split the combined alert stream by which rule fired on the alert day:
 

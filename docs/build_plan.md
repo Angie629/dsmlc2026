@@ -286,8 +286,8 @@ Owners: A = Angie, J = Jacob, N = Ananya. ◆ marks a checkpoint.
 | Sat 3–5 PM | s10 | Dashboard polish + optional Genie space | Angie |  |
 | Sat 3–5 PM | s11 | Sensitivity table + limitations list | Jacob |  |
 | Sat 3–5 PM | s12 | Weather join: dropped at c3 | Ananya |  |
-| Sat 4–6:30 PM · rules first; ML only as a time-boxed challenger | n6 | Alert tiers: raise precision without ML | Ananya | `notebooks/04a_early_warning.py` |
-| Sat 4–6:30 PM · rules first; ML only as a time-boxed challenger | n7 | Optional ML challenger (90 minutes, hard stop) | Jacob | `notebooks/04b_ml_challenger.py` (new, optional) |
+| Sat 4–6:30 PM · rules first; ML only as a time-boxed challenger | n6 | Alert tiers: raise precision without ML | Ananya | `notebooks/04b_ml_challenger.py` |
+| Sat 4–6:30 PM · rules first; ML only as a time-boxed challenger | n7 | Optional ML challenger (90 minutes, hard stop) | Jacob | `notebooks/04b_ml_challenger.py` |
 | Sat 4–6:30 PM · rules first; ML only as a time-boxed challenger | n8 | Dashboard improvements | Angie |  |
 | Sat 5–8 PM (Angie and Ananya from 6:30) | s13 | README findings and methods | Angie |  |
 | Sat 5–8 PM (Angie and Ananya from 6:30) | s14 | Slides: problem, data, method, results | Jacob |  |
@@ -726,7 +726,7 @@ capture = test.join(top.select('uwi'), 'uwi').agg(F.sum('cost_score')) / test.ag
 
 ### Sat 4–6:30 PM · rules first; ML only as a time-boxed challenger
 
-#### `n6` Alert tiers: raise precision without ML · Ananya · `notebooks/04a_early_warning.py`
+#### `n6` Alert tiers: raise precision without ML · Ananya · `notebooks/04b_ml_challenger.py`
 
 **Inputs:** `gold_alerts`, `gold_recency_tier`, `gold_warning_eval` (2026 holdout), `04a_early_warning.py`
 
@@ -741,7 +741,7 @@ capture = test.join(top.select('uwi'), 'uwi').agg(F.sum('cost_score')) / test.ag
 
 > **Evidence:** 2026 holdout (s9): watchlist precision 28.8% / recall 34.9%; runtime rule 17.0% / 43.6%; either rule 21.6% / 56.8% (813 of 1,432 failures). Expect the both-rules tier well above 28.8%, but it has not been measured yet.
 
-#### `n7` Optional ML challenger (90 minutes, hard stop) · Jacob · `notebooks/04b_ml_challenger.py` (new, optional)
+#### `n7` Optional ML challenger (90 minutes, hard stop) · Jacob · `notebooks/04b_ml_challenger.py`
 
 **Inputs:** `gold_recency_tier` snapshots, `gold_failure_downtime`, `silver_jobs`, `feat_daily_sensor`, `gold_warning_eval`
 
